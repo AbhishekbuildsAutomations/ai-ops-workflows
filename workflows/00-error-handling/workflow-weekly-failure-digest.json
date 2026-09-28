@@ -1,0 +1,322 @@
+{
+  "id": "aiopsWeeklyDig00",
+  "name": "00 · Weekly failure digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "fda30e91-283c-4bac-8624-fe4827dee752",
+      "name": "Every Monday 9:00 IST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "3a5aed61-c0e5-4b1f-8bcd-485653c795f9",
+      "name": "Run now (test)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH w AS (SELECT now() - interval '7 days' AS since)\nSELECT\n  (SELECT count(*) FROM failure_ledger, w WHERE first_seen_at >= since)::int AS new_signatures,\n  (SELECT count(*) FROM failure_ledger, w WHERE last_seen_at  >= since)::int AS active_signatures,\n  (SELECT count(*) FROM failure_ledger WHERE status = 'open')::int  AS open_count,\n  (SELECT count(*) FROM failure_ledger WHERE status = 'fixed')::int AS fixed_count,\n  (SELECT coalesce(json_agg(t), '[]'::json) FROM (\n     SELECT id, workflow_name, failed_node, left(error_message, 120) AS error_message, recurrence_count\n     FROM failure_ledger, w WHERE first_seen_at >= since\n     ORDER BY first_seen_at DESC LIMIT 5) t) AS new_list,\n  (SELECT coalesce(json_agg(t), '[]'::json) FROM (\n     SELECT id, workflow_name, failed_node, left(error_message, 120) AS error_message, recurrence_count, status\n     FROM failure_ledger, w WHERE last_seen_at >= since\n     ORDER BY recurrence_count DESC LIMIT 5) t) AS top_recurring;",
+        "options": {
+          "connectionTimeout": 10
+        }
+      },
+      "id": "b41a3486-ca10-46d3-856c-da6f5dddc344",
+      "name": "Query ledger",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": null,
+          "name": "Ops ledger (Postgres)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst row = (f) => `• <b>${f.recurrence_count}×</b> ${esc(f.workflow_name)} → ${esc(f.failed_node)}: ${esc(f.error_message)} (#${f.id})`;\nconst weekEnding = $now.setZone('Asia/Kolkata').toISODate();\n\nconst text = [\n  `<b>📊 Weekly failure digest</b> (7 days to ${weekEnding})`,\n  '',\n  `New signatures: <b>${d.new_signatures}</b>`,\n  `Signatures seen this week: <b>${d.active_signatures}</b>`,\n  `Ledger: <b>${d.open_count}</b> open / <b>${d.fixed_count}</b> fixed`,\n  '',\n  '<b>Top recurring this week</b>',\n  ...(d.top_recurring.length ? d.top_recurring.map(row) : ['none 🎉']),\n  '',\n  '<b>New this week</b>',\n  ...(d.new_list.length ? d.new_list.map(row) : ['none']),\n].join('\\n');\n\nconst top = d.top_recurring[0];\nreturn [{ json: {\n  text,\n  sheet_row: {\n    week_ending: weekEnding,\n    new_signatures: d.new_signatures,\n    active_signatures: d.active_signatures,\n    open: d.open_count,\n    fixed: d.fixed_count,\n    top_signature: top ? `${top.workflow_name} → ${top.failed_node}: ${top.error_message}` : '',\n    top_count: top ? top.recurrence_count : 0,\n  },\n} }];"
+      },
+      "id": "458cdd55-3926-4bbe-8630-6ce48da82b9f",
+      "name": "Format digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "b3f9d3e3-afc6-4fd4-844d-17afa7333d1c",
+      "name": "Send digest",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        680,
+        -100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": null,
+          "name": "Ops alerts (Telegram bot)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d7b474c9-1252-407d-80f2-b9753abb4d9d",
+              "leftValue": "={{ $env.DIGEST_SHEETS_ENABLED }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a373525b-99bd-42b3-8e37-1bf146e5264e",
+      "name": "Sheets enabled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.DIGEST_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Digest"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "week_ending": "={{ $json.sheet_row.week_ending }}",
+            "new_signatures": "={{ $json.sheet_row.new_signatures }}",
+            "active_signatures": "={{ $json.sheet_row.active_signatures }}",
+            "open": "={{ $json.sheet_row.open }}",
+            "fixed": "={{ $json.sheet_row.fixed }}",
+            "top_signature": "={{ $json.sheet_row.top_signature }}",
+            "top_count": "={{ $json.sheet_row.top_count }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "week_ending",
+              "displayName": "week_ending",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "new_signatures",
+              "displayName": "new_signatures",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "active_signatures",
+              "displayName": "active_signatures",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "open",
+              "displayName": "open",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fixed",
+              "displayName": "fixed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "top_signature",
+              "displayName": "top_signature",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "top_count",
+              "displayName": "top_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fbc41420-d15f-4cee-8965-8792abbe6618",
+      "name": "Append row to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        900,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Weekly digest\nMonday 09:00 **Asia/Kolkata** (set in workflow settings, so it does not depend on the server timezone).\n\nGoogle Sheets is optional: set `DIGEST_SHEETS_ENABLED=true` and `DIGEST_SHEET_ID`, add a Google Sheets credential to **Append row to Sheet**, and give the sheet a tab named `Digest` with the column headers in the README.",
+        "height": 320,
+        "width": 380,
+        "color": 5
+      },
+      "id": "6de52ada-8599-4e6c-8402-30a3b9fe830a",
+      "name": "Note 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -120
+      ]
+    }
+  ],
+  "connections": {
+    "Every Monday 9:00 IST": {
+      "main": [
+        [
+          {
+            "node": "Query ledger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (test)": {
+      "main": [
+        [
+          {
+            "node": "Query ledger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query ledger": {
+      "main": [
+        [
+          {
+            "node": "Format digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format digest": {
+      "main": [
+        [
+          {
+            "node": "Send digest",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sheets enabled?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets enabled?": {
+      "main": [
+        [
+          {
+            "node": "Append row to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "errorWorkflow": "aiopsErrHandler0"
+  }
+}
