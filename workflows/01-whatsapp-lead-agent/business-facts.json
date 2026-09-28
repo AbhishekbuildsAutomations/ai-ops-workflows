@@ -1,0 +1,25 @@
+{
+  "business_name": "Sparkle Home Cleaning",
+  "what_we_sell": "Deep cleaning, move-in/move-out cleaning and sofa/carpet shampooing for homes and small offices.",
+  "service_area": "Bengaluru (all areas inside the Outer Ring Road)",
+  "hours": "Mon-Sat, 8am-7pm IST",
+  "prices": [
+    "1BHK deep cleaning from ₹2,499",
+    "2BHK deep cleaning from ₹3,499",
+    "3BHK deep cleaning from ₹4,499",
+    "Sofa shampoo from ₹799 per seat set"
+  ],
+  "policies": [
+    "Free re-clean within 48 hours if a customer is unhappy",
+    "Booking needs a 20% advance"
+  ],
+  "qualifying_questions": [
+    "Which area are you in, and how many bedrooms?",
+    "When would you like the cleaning done?",
+    "Is this a move-in/move-out clean or a regular deep clean?"
+  ],
+  "reply_min_score": 40,
+  "reply_max_chars": 320,
+  "fallback_reply": "Thanks for your message! A member of our team will get back to you shortly.",
+  "followup_message": "Hi again! Just checking if you'd still like help with cleaning. Reply here and we'll take it from there."
+}
