@@ -17,6 +17,21 @@
     },
     {
       "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "7d1e6a52-3c9b-4f0e-8a51-0e6f2b9c4d11",
+      "name": "Report handled failure",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ],
+      "notes": "Lets another workflow log a failure it recovered from (e.g. LLM down) without crashing; expects the same {execution, workflow} shape as the Error Trigger.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
         "jsCode": "// Turns the Error Trigger payload into one ledger row.\n// This workflow is the last line of defence, so nothing here may throw.\nconst j = $input.first().json ?? {};\nconst ex = j.execution ?? {};\nconst trg = j.trigger ?? {};          // present when the failing workflow's TRIGGER broke\nconst wf = j.workflow ?? {};\nconst err = ex.error ?? trg.error ?? {};\n\nconst message = String(err.message || err.description || 'Unknown error').slice(0, 2000);\nconst failedNode = ex.lastNodeExecuted || err.node?.name || (j.trigger ? 'trigger' : 'unknown');\n\n// Mask the parts of a message that change between runs of the same bug,\n// so \"order 4812 after 3021ms\" and \"order 77 after 3950ms\" group together.\nfunction normalise(s) {\n  return s\n    .toLowerCase()\n    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')\n    .replace(/\\d{4}-\\d{2}-\\d{2}[t ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(z|[+-]\\d{2}:?\\d{2})?/g, '<ts>')\n    .replace(/https?:\\/\\/\\S+/g, '<url>')\n    .replace(/[\\w.+-]+@[\\w-]+\\.[\\w.]+/g, '<email>')\n    .replace(/\\b(?=[0-9a-f]*\\d)[0-9a-f]{8,}\\b/g, '<hex>')\n    .replace(/\\d+(\\.\\d+)?/g, '<n>')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, 300);\n}\n\nreturn [{ json: {\n  signature: [wf.id || wf.name || 'unknown', failedNode, normalise(message)].join(' | '),\n  workflow_id: wf.id ?? null,\n  workflow_name: wf.name || 'unknown workflow',\n  failed_node: failedNode,\n  error_message: message,\n  execution_id: ex.id ?? null,\n  execution_url: ex.url ?? null,\n  error_at: new Date(trg.error?.timestamp ?? Date.now()).toISOString(),\n} }];"
       },
       "id": "3d2d2ad0-df7b-4171-8c0c-ce24656e68f1",
@@ -109,7 +124,7 @@
     },
     {
       "parameters": {
-        "content": "## Error handler\nSet this as the **Error workflow** in every other workflow's settings.\n\n1. Masks ids, numbers, urls and timestamps in the error → `signature`.\n2. One SQL upsert: new signature inserts, a repeat bumps `recurrence_count`. A repeat of a `fixed` row reopens it.\n3. Telegram alert.\n\nPostgres and Telegram are set to **continue on error** with 3 tries, so a dead database still alerts and a dead bot still logs.",
+        "content": "## Error handler\nSet this as the **Error workflow** in every other workflow's settings. Workflows can also call it directly (**Report handled failure**) to log a failure they recovered from.\n\n1. Masks ids, numbers, urls and timestamps in the error → `signature`.\n2. One SQL upsert: new signature inserts, a repeat bumps `recurrence_count`. A repeat of a `fixed` row reopens it.\n3. Telegram alert.\n\nPostgres and Telegram are set to **continue on error** with 3 tries, so a dead database still alerts and a dead bot still logs.",
         "height": 380,
         "width": 380,
         "color": 3
@@ -163,6 +178,17 @@
         [
           {
             "node": "Send Telegram alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report handled failure": {
+      "main": [
+        [
+          {
+            "node": "Build signature",
             "type": "main",
             "index": 0
           }
