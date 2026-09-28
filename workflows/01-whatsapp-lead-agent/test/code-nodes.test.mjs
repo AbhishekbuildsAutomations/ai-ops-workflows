@@ -32,6 +32,8 @@ assert.equal('extra' in v.q, false, 'extra keys are dropped');
 [v] = await run(validate, { json: { text: JSON.stringify({ ...good, intent: 'purchase', fit_score: '82' }) } });
 assert.equal(v.valid, false);
 assert.equal(v.errors.length, 2, 'bad enum and string score both reported');
+[v] = await run(validate, { json: { text: '<thought>\n* Input: need cleaning\n* Goal: return {json}\n</thought>\n' + JSON.stringify(good) } });
+assert.equal(v.valid, true, 'a <thought> preamble (Gemma fallback) is stripped');
 [v] = await run(validate, { json: { text: 'Sure! Here is the JSON you asked for' } });
 assert.match(v.errors[0], /not valid JSON/);
 [v] = await run(validate, { json: { text: '[1,2]' } });

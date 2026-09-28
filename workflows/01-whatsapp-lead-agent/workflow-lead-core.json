@@ -131,7 +131,8 @@
       "parameters": {
         "promptType": "define",
         "text": "={{ $json.prompt }}",
-        "hasOutputParser": false
+        "hasOutputParser": false,
+        "needsFallback": true
       },
       "id": "c6c9f474-8f02-4403-8e9d-f1fc43908d3a",
       "name": "Qualify (LLM)",
@@ -145,7 +146,7 @@
       "notesInFlow": true,
       "onError": "continueErrorOutput",
       "retryOnFail": true,
-      "maxTries": 3,
+      "maxTries": 2,
       "waitBetweenTries": 5000
     },
     {
@@ -155,11 +156,12 @@
           "mode": "id",
           "value": "={{ $env.LLM_MODEL }}"
         },
+        "responsesApiEnabled": false,
         "options": {
           "responseFormat": "json_object",
           "temperature": 0.2,
-          "timeout": 30000,
-          "maxRetries": 1
+          "timeout": 20000,
+          "maxRetries": 0
         }
       },
       "id": "d31ef70b-b201-422e-82ac-1e4e0278931d",
@@ -167,10 +169,10 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
       "position": [
-        1100,
+        1040,
         520
       ],
-      "notes": "OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL.",
+      "notes": "OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL. 20 s timeout, then the fallback takes over.",
       "notesInFlow": true,
       "credentials": {
         "openAiApi": {
@@ -181,7 +183,39 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parses and checks the model's answer against the lead schema. Never throws.\nconst raw = String($json.text ?? $json.output ?? '');\nconst errors = [];\nlet q = null;\ntry {\n  q = JSON.parse(raw.replace(/^\\s*```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\n} catch (e) {\n  errors.push('not valid JSON: ' + e.message);\n}\nif (q && typeof q === 'object' && !Array.isArray(q)) {\n  const oneOf = (k, xs) => { if (!xs.includes(q[k])) errors.push(`${k} must be one of ${xs.join(' / ')}, got ${JSON.stringify(q[k])}`); };\n  oneOf('intent', ['buy', 'pricing', 'support', 'spam', 'other']);\n  oneOf('budget_signal', ['stated', 'implied', 'none']);\n  oneOf('urgency', ['now', 'this_month', 'later', 'unknown']);\n  if (!Number.isInteger(q.fit_score) || q.fit_score < 0 || q.fit_score > 100) errors.push('fit_score must be an integer from 0 to 100');\n  if (!Array.isArray(q.missing_info) || !q.missing_info.every((x) => typeof x === 'string')) errors.push('missing_info must be an array of strings');\n  if (typeof q.reply_draft !== 'string') errors.push('reply_draft must be a string');\n  if (typeof q.reason !== 'string' || !q.reason.trim()) errors.push('reason must be a non-empty string');\n  // keep only the schema's keys\n  q = { intent: q.intent, budget_signal: q.budget_signal, urgency: q.urgency, fit_score: q.fit_score, missing_info: q.missing_info, reply_draft: q.reply_draft, reason: q.reason };\n} else if (!errors.length) {\n  errors.push('answer must be a JSON object');\n}\nreturn [{ json: { attempt: 1, valid: errors.length === 0, errors, q: errors.length ? null : q, raw: raw.slice(0, 4000) } }];"
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.LLM_FALLBACK_MODEL }}"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "responseFormat": "json_object",
+          "temperature": 0.2,
+          "timeout": 45000,
+          "maxRetries": 1
+        }
+      },
+      "id": "db03c165-21f4-4499-8d5d-55ce9a9c4eeb",
+      "name": "Fallback model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1180,
+        520
+      ],
+      "notes": "Used only if the main model errors or times out (free tiers get \"high demand\" 503s): LLM_FALLBACK_MODEL, same credential.",
+      "notesInFlow": true,
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "LLM (OpenAI-compatible)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parses and checks the model's answer against the lead schema. Never throws.\nconst raw = String($json.text ?? $json.output ?? '');\nconst errors = [];\nlet q = null;\n// Some models (e.g. the Gemma fallback) prepend a <thought>...</thought> block or wrap the JSON in\n// code fences; take the outermost {...} after removing those.\nconst cleaned = raw.replace(/<thought>[\\s\\S]*?<\\/thought>/gi, '').replace(/```(?:json)?/gi, '');\nconst start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}');\ntry {\n  q = JSON.parse(start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned);\n} catch (e) {\n  errors.push('not valid JSON: ' + e.message);\n}\nif (q && typeof q === 'object' && !Array.isArray(q)) {\n  const oneOf = (k, xs) => { if (!xs.includes(q[k])) errors.push(`${k} must be one of ${xs.join(' / ')}, got ${JSON.stringify(q[k])}`); };\n  oneOf('intent', ['buy', 'pricing', 'support', 'spam', 'other']);\n  oneOf('budget_signal', ['stated', 'implied', 'none']);\n  oneOf('urgency', ['now', 'this_month', 'later', 'unknown']);\n  if (!Number.isInteger(q.fit_score) || q.fit_score < 0 || q.fit_score > 100) errors.push('fit_score must be an integer from 0 to 100');\n  if (!Array.isArray(q.missing_info) || !q.missing_info.every((x) => typeof x === 'string')) errors.push('missing_info must be an array of strings');\n  if (typeof q.reply_draft !== 'string') errors.push('reply_draft must be a string');\n  if (typeof q.reason !== 'string' || !q.reason.trim()) errors.push('reason must be a non-empty string');\n  // keep only the schema's keys\n  q = { intent: q.intent, budget_signal: q.budget_signal, urgency: q.urgency, fit_score: q.fit_score, missing_info: q.missing_info, reply_draft: q.reply_draft, reason: q.reason };\n} else if (!errors.length) {\n  errors.push('answer must be a JSON object');\n}\nreturn [{ json: { attempt: 1, valid: errors.length === 0, errors, q: errors.length ? null : q, raw: raw.slice(0, 4000) } }];"
       },
       "id": "dfa7c720-7ade-432d-88de-9ade903ad596",
       "name": "Validate answer",
@@ -250,7 +284,8 @@
       "parameters": {
         "promptType": "define",
         "text": "={{ $json.prompt }}",
-        "hasOutputParser": false
+        "hasOutputParser": false,
+        "needsFallback": true
       },
       "id": "d1ba974b-b456-4ed4-8bfc-84ac66362644",
       "name": "Qualify again (LLM)",
@@ -264,7 +299,7 @@
       "notesInFlow": true,
       "onError": "continueErrorOutput",
       "retryOnFail": true,
-      "maxTries": 3,
+      "maxTries": 2,
       "waitBetweenTries": 5000
     },
     {
@@ -274,11 +309,12 @@
           "mode": "id",
           "value": "={{ $env.LLM_MODEL }}"
         },
+        "responsesApiEnabled": false,
         "options": {
           "responseFormat": "json_object",
           "temperature": 0.2,
-          "timeout": 30000,
-          "maxRetries": 1
+          "timeout": 20000,
+          "maxRetries": 0
         }
       },
       "id": "422b0c6e-467c-40a8-8bd7-c5f0e499612a",
@@ -286,10 +322,10 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
       "position": [
-        1980,
+        1920,
         660
       ],
-      "notes": "OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL.",
+      "notes": "OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL. 20 s timeout, then the fallback takes over.",
       "notesInFlow": true,
       "credentials": {
         "openAiApi": {
@@ -300,7 +336,39 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parses and checks the model's answer against the lead schema. Never throws.\nconst raw = String($json.text ?? $json.output ?? '');\nconst errors = [];\nlet q = null;\ntry {\n  q = JSON.parse(raw.replace(/^\\s*```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\n} catch (e) {\n  errors.push('not valid JSON: ' + e.message);\n}\nif (q && typeof q === 'object' && !Array.isArray(q)) {\n  const oneOf = (k, xs) => { if (!xs.includes(q[k])) errors.push(`${k} must be one of ${xs.join(' / ')}, got ${JSON.stringify(q[k])}`); };\n  oneOf('intent', ['buy', 'pricing', 'support', 'spam', 'other']);\n  oneOf('budget_signal', ['stated', 'implied', 'none']);\n  oneOf('urgency', ['now', 'this_month', 'later', 'unknown']);\n  if (!Number.isInteger(q.fit_score) || q.fit_score < 0 || q.fit_score > 100) errors.push('fit_score must be an integer from 0 to 100');\n  if (!Array.isArray(q.missing_info) || !q.missing_info.every((x) => typeof x === 'string')) errors.push('missing_info must be an array of strings');\n  if (typeof q.reply_draft !== 'string') errors.push('reply_draft must be a string');\n  if (typeof q.reason !== 'string' || !q.reason.trim()) errors.push('reason must be a non-empty string');\n  // keep only the schema's keys\n  q = { intent: q.intent, budget_signal: q.budget_signal, urgency: q.urgency, fit_score: q.fit_score, missing_info: q.missing_info, reply_draft: q.reply_draft, reason: q.reason };\n} else if (!errors.length) {\n  errors.push('answer must be a JSON object');\n}\nreturn [{ json: { attempt: 2, valid: errors.length === 0, errors, q: errors.length ? null : q, raw: raw.slice(0, 4000) } }];"
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.LLM_FALLBACK_MODEL }}"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "responseFormat": "json_object",
+          "temperature": 0.2,
+          "timeout": 45000,
+          "maxRetries": 1
+        }
+      },
+      "id": "1d67447b-a1db-4b2c-8831-4c4b6fbbc6ba",
+      "name": "Fallback model (retry)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        2060,
+        660
+      ],
+      "notes": "Used only if the main model errors or times out (free tiers get \"high demand\" 503s): LLM_FALLBACK_MODEL, same credential.",
+      "notesInFlow": true,
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "LLM (OpenAI-compatible)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parses and checks the model's answer against the lead schema. Never throws.\nconst raw = String($json.text ?? $json.output ?? '');\nconst errors = [];\nlet q = null;\n// Some models (e.g. the Gemma fallback) prepend a <thought>...</thought> block or wrap the JSON in\n// code fences; take the outermost {...} after removing those.\nconst cleaned = raw.replace(/<thought>[\\s\\S]*?<\\/thought>/gi, '').replace(/```(?:json)?/gi, '');\nconst start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}');\ntry {\n  q = JSON.parse(start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned);\n} catch (e) {\n  errors.push('not valid JSON: ' + e.message);\n}\nif (q && typeof q === 'object' && !Array.isArray(q)) {\n  const oneOf = (k, xs) => { if (!xs.includes(q[k])) errors.push(`${k} must be one of ${xs.join(' / ')}, got ${JSON.stringify(q[k])}`); };\n  oneOf('intent', ['buy', 'pricing', 'support', 'spam', 'other']);\n  oneOf('budget_signal', ['stated', 'implied', 'none']);\n  oneOf('urgency', ['now', 'this_month', 'later', 'unknown']);\n  if (!Number.isInteger(q.fit_score) || q.fit_score < 0 || q.fit_score > 100) errors.push('fit_score must be an integer from 0 to 100');\n  if (!Array.isArray(q.missing_info) || !q.missing_info.every((x) => typeof x === 'string')) errors.push('missing_info must be an array of strings');\n  if (typeof q.reply_draft !== 'string') errors.push('reply_draft must be a string');\n  if (typeof q.reason !== 'string' || !q.reason.trim()) errors.push('reason must be a non-empty string');\n  // keep only the schema's keys\n  q = { intent: q.intent, budget_signal: q.budget_signal, urgency: q.urgency, fit_score: q.fit_score, missing_info: q.missing_info, reply_draft: q.reply_draft, reason: q.reason };\n} else if (!errors.length) {\n  errors.push('answer must be a JSON object');\n}\nreturn [{ json: { attempt: 2, valid: errors.length === 0, errors, q: errors.length ? null : q, raw: raw.slice(0, 4000) } }];"
       },
       "id": "a72d8d13-eee8-46f9-8470-67b34f07a443",
       "name": "Validate retry",
@@ -709,6 +777,17 @@
         ]
       ]
     },
+    "Fallback model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Qualify (LLM)",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
     "Qualify (LLM)": {
       "main": [
         [
@@ -774,6 +853,17 @@
             "node": "Qualify again (LLM)",
             "type": "ai_languageModel",
             "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback model (retry)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Qualify again (LLM)",
+            "type": "ai_languageModel",
+            "index": 1
           }
         ]
       ]
