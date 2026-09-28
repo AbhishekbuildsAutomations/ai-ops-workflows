@@ -1,0 +1,88 @@
+# Build log
+
+Everything that failed or surprised me while building this, with the cause and the fix. Newest last.
+
+Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, macOS.
+
+---
+
+## Workflow 0: error handling and failure ledger (2026-09-28)
+
+### 1. n8n docs URLs had moved
+- **Symptom:** `docs.n8n.io/flow-logic/error-handling/` and `/hosting/installation/docker/` returned 404.
+- **Cause:** the docs were reorganised under `/build/…` and `/deploy/…`.
+- **Fix:** fetched `docs.n8n.io/sitemap.md` and used the `.md` version of each page. Every node setting here comes from the current page or from the n8n source in the image, not from memory.
+
+### 2. The docs contradict each other on env access in expressions
+- **Symptom:** the env-vars reference says `N8N_BLOCK_ENV_ACCESS_IN_NODE` defaults to `false`; the 2.0 breaking-changes page says `true`.
+- **Cause:** one page is stale.
+- **Fix:** read the source. `n8n-workflow/dist/cjs/workflow-data-proxy-env-provider.js` blocks access unless the value is exactly the string `'false'`. So it is blocked by default, and compose sets it to `false`.
+- **Follow-on:** with env access on, a workflow can read every env var in the n8n container. The DB password, encryption key and runner token therefore go in as Docker Compose secrets (`environment:` source → `/run/secrets/…` → `*_FILE` vars), and the container environment holds only non-secret values. Checked with `docker compose exec n8n env`.
+
+### 3. Docker wasn't installed
+- **Fix:** `brew install colima docker docker-compose`, then `colima start --cpu 2 --memory 4`. Compose needed `"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]` in `~/.docker/config.json` to be found as `docker compose`. No GUI and no licence prompt. A native n8n already used port 5678, so this stack ran on `N8N_PORT=5680` locally.
+
+### 4. The error workflow didn't run: "is not active and cannot be executed"
+- **Symptom:** the test workflow failed, but no ledger row appeared. Log: `Calling Error Workflow for "aiopsTestFail000". Workflow "aiopsErrHandler0" is not active and cannot be executed`.
+- **Cause:** the Error Trigger docs say *"If a workflow uses the Error Trigger node, you don't have to publish the workflow."* That is not true in 2.40.7.
+- **Fix:** `bootstrap.sh` publishes the error handler too (`n8n publish:workflow`, then a restart, because CLI publish only takes effect on restart).
+
+### 5. Re-importing a workflow unpublishes it
+- **Symptom:** after re-importing the handler to test a change, errors stopped being logged again.
+- **Cause:** `n8n import:workflow` defaults to `--activeState=false`, which deactivates what it imports.
+- **Fix:** bootstrap always publishes after importing. Rule: after any CLI import, publish and restart.
+
+### 6. Telegram: `Bad Request: chat not found`
+- **Symptom:** the ledger row was written and the handler reported success, but no message arrived. The Telegram node's output was `{"error":"Bad Request: chat not found"}`.
+- **Cause:** a new bot can't message a user who hasn't pressed **Start** on it. The chat ID was right; the bot was new.
+- **Fix:** press Start in the bot's chat. The README setup now has this as step 2.
+- **Useful side effect:** this proved the "never fails itself" design. Telegram failed and the ledger write still happened, and the execution stayed green.
+
+### 7. Ledger-down alert said `[object Object]`
+- **Test:** renamed `failure_ledger` mid-run to simulate a dead database.
+- **Symptom:** the alert went out (good) but the reason read `Ledger: [object Object]`.
+- **Cause:** with *continue on error*, a failed node outputs `{ message: "...", error: { ...details } }`. I had read `error.message`, which doesn't exist.
+- **Fix:** read `r.message` first. Re-tested: the alert now reads `relation "failure_ledger" does not exist`.
+
+### 8. Credentials didn't re-link unless `id` was `null`
+- **Question:** can the committed JSON reference credentials by name only, so a fresh instance links them?
+- **Finding:** n8n's `replaceInvalidCredentials` (`dist/workflow-helpers.js`) looks a credential up by name and type only when the reference is a string or has `id === null`. A missing `id` does not trigger the lookup.
+- **Fix:** the export script writes `{"id": null, "name": "Ops ledger (Postgres)"}`. After a clean import, the DB showed both nodes linked to the bootstrap-created credentials.
+
+### 9. `n8n execute` from the CLI failed twice
+- **Symptom 1:** `n8n Task Broker's port 5679 is already in use`. The CLI command starts its own task broker, which collides with the running n8n.
+  **Fix (testing only):** `docker compose exec -e N8N_RUNNERS_MODE=internal -e N8N_RUNNERS_BROKER_PORT=5690 -e N8N_RUNNERS_AUTH_TOKEN_FILE= n8n n8n execute --id=…`.
+- **Symptom 2:** `Missing node to start execution`. The CLI needs a Manual or Execute Workflow trigger.
+  **Fix:** added a **Run now (test)** manual trigger to the digest. It also gives a reviewer a one-click test in the UI.
+
+### 10. Deprecation warnings at startup
+- `WEBHOOK_URL` has been deprecated since 2.35 → `N8N_WEBHOOK_URL`.
+- Internal task-runner mode is deprecated → an external `n8nio/runners` container, as in n8n's official `withPostgres` compose example.
+
+### 11. The docs show the wrong execution URL
+- The docs' Error Trigger example has `https://n8n.example.com/execution/231`. The code (`execution-lifecycle/execute-error-workflow.js`) builds `<base>/workflow/<workflowId>/executions/<executionId>`. The alert uses whatever n8n sends, and `N8N_EDITOR_BASE_URL` sets the host.
+
+### 12. macOS ships bash 3.2
+- `declare -A` (associative arrays) doesn't exist in bash 3.2, so the export script's id → file map broke. Replaced it with a `grep -rl` lookup.
+
+### 13. Things I avoided on purpose, from the docs
+- **Postgres Query Parameters as a comma-separated string** split on commas inside values, and error messages contain commas. The node gets an array expression instead: `={{ [ $json.signature, … ] }}`.
+- **Schedule timezone:** the Schedule Trigger follows the workflow timezone, then the instance timezone (default `America/New_York`). The digest sets `settings.timezone = Asia/Kolkata`, so "Monday 9 AM IST" holds on any server.
+
+### Verified end to end (clean volumes, `docker compose down -v` then `bootstrap.sh`)
+- `schema.sql` created `failure_ledger` on first start.
+- Test webhook ×2 → one row, `recurrence_count = 2`, two Telegram messages delivered.
+- Marked `fixed` → next failure reopened it, and the alert said "Regression".
+- Table renamed → the alert still went out, saying why the ledger write failed.
+- The digest ran → Telegram message delivered; Sheets branch skipped with the flag off.
+- **Not verified:** the Monday 09:00 cron firing on its own (it needs a Monday morning), and the Google Sheets append (it needs a Google OAuth credential).
+
+---
+
+## What I should be able to explain about Workflow 0
+
+1. **Why a ledger and not just alerts:** an alert tells you something broke; a ledger tells you it's the fortieth time. The signature (workflow + node + message with ids, numbers, URLs and timestamps masked) is what makes 40 runs one row.
+2. **Why one SQL statement:** `INSERT … ON CONFLICT (signature) DO UPDATE SET recurrence_count = recurrence_count + 1` is atomic, so concurrent failures can't double-insert or lose a count. A CTE reads the old status in the same statement to flag regressions of "fixed" bugs.
+3. **How it never fails itself:** Postgres and Telegram both continue on error with retries, Postgres first. A dead DB still alerts (and says so); a dead bot still logs. The Code nodes never throw. n8n won't recurse an error workflow into itself.
+4. **How it stays runnable and leak-free:** fixed workflow IDs, credentials referenced by name with `id: null`, the chat ID from `$env`, and secrets as Docker `*_FILE` secrets because env access is on. The export script strips metadata and refuses tokens, emails and the chat ID.
+5. **What I'd do next:** suppress repeat alerts within a time window, give the ledger its own DB role, and alert on a spike (N failures in M minutes) rather than on every failure.
