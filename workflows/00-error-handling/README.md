@@ -86,18 +86,9 @@ The ledger after three runs of the test workflow. Each run had a different order
 
 ![failure_ledger after three runs](screenshots/ledger-table.png)
 
-The Telegram alert for the third run, as sent (HTML parse mode):
+The Telegram alerts from the same test session, top to bottom: the first failure, a repeat (`Seen: 2 times`), the weekly digest run by hand, another repeat, and the regression alert after the row was marked `fixed`. Each alert's "Open execution" line links to the failed run in n8n.
 
-```
-🔁 Repeat failure
-
-Workflow: 00 · Test: fail on purpose
-Node: Call payment API (simulated)
-Error: Payment API timed out for order 30724 after 3810ms
-Seen: 3 times (ledger #1)
-
-Open execution 6
-```
+![Telegram alerts: new, repeat, weekly digest, repeat, regression](screenshots/telegram-alerts.png)
 
 ## Known limits
 

@@ -69,6 +69,11 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
 - **Postgres Query Parameters as a comma-separated string** split on commas inside values, and error messages contain commas. The node gets an array expression instead: `={{ [ $json.signature, … ] }}`.
 - **Schedule timezone:** the Schedule Trigger follows the workflow timezone, then the instance timezone (default `America/New_York`). The digest sets `settings.timezone = Asia/Kolkata`, so "Monday 9 AM IST" holds on any server.
 
+### 14. Personal email in commit metadata
+- **Symptom:** the pre-push scan found every file clean, but all 12 commits had a personal Gmail as author and committer, from the global git config. GitHub shows that publicly.
+- **Fix (before any push):** set the repo's `user.email` to the GitHub no-reply address, rewrite all commits with `git filter-branch --env-filter` (author and committer email), then `reflog expire` and `gc --prune=now`, so no object with the old email is left. Checked with `git cat-file --batch-all-objects`.
+- **Lesson:** scanning file contents is not enough. Commit metadata is published too.
+
 ### Verified end to end (clean volumes, `docker compose down -v` then `bootstrap.sh`)
 - `schema.sql` created `failure_ledger` on first start.
 - Test webhook ×2 → one row, `recurrence_count = 2`, two Telegram messages delivered.
