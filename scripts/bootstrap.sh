@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 
 [ -f .env ] || { echo "No .env. Run: cp .env.example .env   then fill it in."; exit 1; }
 set -a; . ./.env; set +a
-for v in N8N_ENCRYPTION_KEY RUNNERS_AUTH_TOKEN POSTGRES_PASSWORD TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+for v in N8N_ENCRYPTION_KEY RUNNERS_AUTH_TOKEN POSTGRES_PASSWORD TELEGRAM_CHAT_ID; do
   case "${!v:-}" in ''|change-me|123456789|*replace-with*) echo "Set $v in .env first."; exit 1 ;; esac
 done
 
@@ -16,9 +16,10 @@ docker compose up -d
 echo -n "waiting for n8n"
 until curl -sf "http://localhost:${N8N_PORT:-5678}/healthz" >/dev/null; do echo -n .; sleep 2; done; echo
 
-# Credentials are built inside the container. The bot token is passed to this one process
-# only (-e), never to the n8n container's environment, so $env cannot read it.
-docker compose exec -T -e TG_TOKEN="$TELEGRAM_BOT_TOKEN" n8n sh -c '
+# Credentials are built inside the container. The bot token is optional here: if set, it is
+# passed to this one process only (-e), never to the n8n container's environment, so $env
+# cannot read it. If blank, create the Telegram credential in the n8n UI instead (README).
+docker compose exec -T -e TG_TOKEN="${TELEGRAM_BOT_TOKEN:-}" n8n sh -c '
   node -e "
     const fs = require(\"fs\");
     fs.writeFileSync(\"/tmp/creds.json\", JSON.stringify([
@@ -26,8 +27,8 @@ docker compose exec -T -e TG_TOKEN="$TELEGRAM_BOT_TOKEN" n8n sh -c '
           host: \"postgres\", port: 5432, database: process.env.DB_POSTGRESDB_DATABASE,
           user: process.env.DB_POSTGRESDB_USER, ssl: \"disable\",
           password: fs.readFileSync(\"/run/secrets/postgres_password\", \"utf8\").trim() } },
-      { id: \"aiopsCredTg00001\", name: \"Ops alerts (Telegram bot)\", type: \"telegramApi\", data: {
-          accessToken: process.env.TG_TOKEN } }
+      ...(process.env.TG_TOKEN ? [{ id: \"aiopsCredTg00001\", name: \"Ops alerts (Telegram bot)\", type: \"telegramApi\", data: {
+          accessToken: process.env.TG_TOKEN } }] : [])
     ]));
   " && n8n import:credentials --input=/tmp/creds.json; rc=$?; rm -f /tmp/creds.json; exit $rc'
 
@@ -48,4 +49,5 @@ until curl -sf "http://localhost:${N8N_PORT:-5678}/healthz" >/dev/null; do sleep
 
 echo
 echo "Ready: http://localhost:${N8N_PORT:-5678}  (first visit asks you to create the owner account)"
+[ -n "${TELEGRAM_BOT_TOKEN:-}" ] || echo "No TELEGRAM_BOT_TOKEN: create the Telegram credential in n8n (README, Configure your own alerts)."
 echo "Test:  curl -X POST http://localhost:${N8N_PORT:-5678}/webhook/trigger-failure"
