@@ -1,0 +1,68 @@
+{
+  "id": "aiopsTestFail000",
+  "name": "00 · Test: fail on purpose",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trigger-failure",
+        "options": {}
+      },
+      "id": "c3e8dcb5-0c47-4187-8a31-a78471a9b191",
+      "name": "POST /webhook/trigger-failure",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b7c1c0de-0000-4000-8000-00000000fa11"
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Payment API timed out for order {{ Math.floor(Math.random() * 100000) }} after {{ 3000 + Math.floor(Math.random() * 1000) }}ms"
+      },
+      "id": "bc6b12a9-b557-44a6-8b77-aed09edb6cf1",
+      "name": "Call payment API (simulated)",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Fails on purpose\n`curl -X POST http://localhost:5678/webhook/trigger-failure`\n\nThe order number and duration change every run. The error handler masks them, so every run lands on the **same** ledger row and `recurrence_count` goes up.\n\nError workflow (Settings): **00 · Error handler → failure ledger**.",
+        "height": 300,
+        "width": 380,
+        "color": 6
+      },
+      "id": "951d274e-195e-4e44-8369-a28fcedf50a7",
+      "name": "Note 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -120
+      ]
+    }
+  ],
+  "connections": {
+    "POST /webhook/trigger-failure": {
+      "main": [
+        [
+          {
+            "node": "Call payment API (simulated)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "aiopsErrHandler0"
+  }
+}
