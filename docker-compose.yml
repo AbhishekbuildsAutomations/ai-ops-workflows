@@ -110,8 +110,10 @@ services:
   # The all-in-one dev image seeds a demo workspace and a fixed API key that only works against
   # this local image (twentyhq/twenty: packages/twenty-sdk/src/cli/constants/dev-api-key.ts).
   # Demo use only: it runs NODE_ENV=development. Login: tim@apple.dev / tim@apple.dev
+  # Pinned to v2.42.6: v2.43.0 serves no frontend routes (every UI page 404s; the API works),
+  # https://github.com/twentyhq/twenty/issues/26755
   twenty:
-    image: twentycrm/twenty-app-dev:${TWENTY_VERSION:-v2.43.0}
+    image: twentycrm/twenty-app-dev:${TWENTY_VERSION:-v2.42.6}
     profiles: [crm]
     restart: unless-stopped
     ports:

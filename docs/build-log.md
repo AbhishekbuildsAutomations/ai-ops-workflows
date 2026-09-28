@@ -209,6 +209,12 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
   **Fix:** publish the agent API as `127.0.0.1:4040:4040` (localhost only, since it shows live traffic) and read `/api/tunnels`, as ngrok's Docker page recommends.
 - **Verified through the public URL:** `/healthz` returned `{"status":"ok"}` as locally, the editor loads (behind the n8n login), and the WhatsApp verify webhook echoed `hub.challenge` (200), with 403 for a wrong token. The domain stayed the same after a restart.
 
+### 32. Twenty v2.43.0 serves no UI: every page 404s, the API works
+- **Symptom:** the CRM sync kept working, but `http://localhost:2020/` returned 404, so nobody could log in to look at the synced leads.
+- **Searched:** known regression in v2.43.0. The frontend's static-file middleware isn't wired up, so the server only registers `/metadata`, `/admin-panel` and `/graphql` (<!-- doc --> https://github.com/twentyhq/twenty/issues/26755). No fixed release yet (newest tag is still v2.43.0).
+- **Fix:** pin `twentycrm/twenty-app-dev:v2.42.6`, the last release before it. Downgrading onto a database v2.43 had already migrated isn't safe, so the demo volumes (seed data plus test records only) were recreated. The seeded API key is unchanged; UI 200 and API 200, and a lead sent through the public URL synced to a new person and deal.
+- **Lesson:** the automated checks only covered the API the workflow uses. A reviewer opens the UI first, so check that too.
+
 ---
 
 ## What I should be able to explain about Workflow 1
