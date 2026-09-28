@@ -1,0 +1,283 @@
+{
+  "id": "aiopsLeadWhats01",
+  "name": "01 · Lead intake: WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "2aadefaf-ba36-499c-8de1-3b9f9276b08a",
+      "name": "GET /webhook/whatsapp (Meta verify)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -160
+      ],
+      "notes": "Meta calls this once when you save the webhook URL in the app dashboard.",
+      "notesInFlow": true,
+      "webhookId": "ab8e2cd5-e171-4b1f-851c-ca2ec0aeacfa"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "0a7f0f13-4066-4085-810d-30ca774197a8",
+              "leftValue": "={{ $json.query['hub.mode'] }}",
+              "rightValue": "subscribe",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "db7df397-b554-4280-8e55-1d8085caf1db",
+              "leftValue": "={{ $json.query['hub.verify_token'] }}",
+              "rightValue": "={{ $env.WHATSAPP_VERIFY_TOKEN }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "756a51a4-a15e-4bd2-820c-4f23443cfb24",
+              "leftValue": "={{ $env.WHATSAPP_VERIFY_TOKEN }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9fe5dfd1-2fea-4976-8906-cb1660e0acb7",
+      "name": "Verify token matches?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        -160
+      ],
+      "notes": "hub.mode must be \"subscribe\" and hub.verify_token must equal WHATSAPP_VERIFY_TOKEN.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {}
+      },
+      "id": "fef908d3-ea92-4ed9-8d37-9a4d8d373d98",
+      "name": "Return hub.challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        440,
+        -260
+      ],
+      "notes": "Echoes hub.challenge as plain text (not JSON), which is what Meta checks.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Forbidden",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "d5bef30b-21b0-415c-83d2-a9859ef1b87e",
+      "name": "Refuse verification",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        440,
+        -60
+      ],
+      "notes": "Wrong or missing verify token.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "2a4f663c-70c9-4ca5-82cc-c8fb942b8e74",
+      "name": "POST /webhook/whatsapp (messages)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        160
+      ],
+      "notes": "Meta posts messages and status updates here; answered 200 at once so Meta does not retry.",
+      "notesInFlow": true,
+      "webhookId": "ea6e2249-284b-4a0f-8489-f5567d49a448"
+    },
+    {
+      "parameters": {
+        "jsCode": "// X-Hub-Signature-256 = \"sha256=\" + HMAC-SHA256(raw body, app secret). Must use the RAW bytes,\n// hence the webhook's \"Raw Body\" option. A mismatch fails the run, so Workflow 0 logs it.\nconst crypto = require('crypto');\nconst secret = $env.WHATSAPP_APP_SECRET || '';\nconst item = $input.first();\nconst body = item.json.body ?? {};\nif (!secret) return [{ json: { ...body, _signature: 'not checked: WHATSAPP_APP_SECRET is not set' } }];\nconst got = String(item.json.headers?.['x-hub-signature-256'] ?? '');\nconst raw = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst want = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\nconst ok = got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));\nif (!ok) throw new Error('WhatsApp webhook signature mismatch');\nreturn [{ json: { ...body, _signature: 'valid' } }];"
+      },
+      "id": "c7c21d44-b1b9-4efc-8f3a-079e2485d344",
+      "name": "Check Meta signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        160
+      ],
+      "notes": "Rejects anything not signed with your Meta app secret.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per inbound message. Status updates (sent/delivered/read) have no \"messages\" and are dropped.\nconst out = [];\nfor (const e of $json.entry ?? []) for (const ch of e.changes ?? []) {\n  const v = ch.value ?? {};\n  if (ch.field !== 'messages' || !Array.isArray(v.messages)) continue;\n  const names = Object.fromEntries((v.contacts ?? []).map((k) => [k.wa_id, k.profile?.name]));\n  for (const m of v.messages) {\n    const text = m.type === 'text' ? m.text?.body\n      : m.type === 'button' ? m.button?.text\n      : m.type === 'interactive' ? (m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title)\n      : null;\n    out.push({ json: {\n      source: 'whatsapp',\n      contact: '+' + String(m.from).replace(/\\D/g, ''),\n      wa_id: m.from,\n      contact_name: names[m.from] ?? null,\n      message: text ?? `[${m.type} message]`,\n      received_at: new Date(Number(m.timestamp) * 1000).toISOString(),\n      external_id: m.id,\n    } });\n  }\n}\nreturn out;"
+      },
+      "id": "9f1b975f-4e22-4305-8727-f6654d2e0c5d",
+      "name": "Extract messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        160
+      ],
+      "notes": "Turns the Meta payload into one lead item per text/button message; ignores status updates.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "aiopsLeadCore001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "4d2f0a10-655d-432e-8e62-b315c99e6660",
+      "name": "Qualify lead (core)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        160
+      ],
+      "notes": "Runs the shared lead core for each message; the core sends the WhatsApp reply.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "content": "## WhatsApp entry\nMeta needs a public HTTPS URL (see README: tunnel profile).\nCallback URL: `<N8N_WEBHOOK_URL>/webhook/whatsapp`\nVerify token: `WHATSAPP_VERIFY_TOKEN`\nSubscribe to the **messages** field.\n\nVerification pattern (Text response, `$json.query['hub.challenge']`) from the n8n community thread linked in the README.",
+        "height": 360,
+        "width": 380,
+        "color": 4
+      },
+      "id": "692308d0-3768-42fc-8f8d-d9bb49b82583",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -280
+      ]
+    }
+  ],
+  "connections": {
+    "GET /webhook/whatsapp (Meta verify)": {
+      "main": [
+        [
+          {
+            "node": "Verify token matches?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify token matches?": {
+      "main": [
+        [
+          {
+            "node": "Return hub.challenge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuse verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /webhook/whatsapp (messages)": {
+      "main": [
+        [
+          {
+            "node": "Check Meta signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Meta signature": {
+      "main": [
+        [
+          {
+            "node": "Extract messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract messages": {
+      "main": [
+        [
+          {
+            "node": "Qualify lead (core)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "aiopsErrHandler0",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

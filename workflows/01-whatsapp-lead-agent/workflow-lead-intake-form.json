@@ -1,0 +1,219 @@
+{
+  "id": "aiopsLeadForm001",
+  "name": "01 · Lead intake: web form",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-form",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "75e37140-d4cd-4e27-83f2-ae6ff13ebc39",
+      "name": "POST /webhook/lead-form",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Web-form entry point: JSON { name, phone or email, message }.",
+      "notesInFlow": true,
+      "webhookId": "d4fde0f2-e5e9-408d-8f04-24ad33ed24f4"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Checks the form body and normalises the contact: +<digits> for phones, lowercase for emails.\nconst b = $json.body ?? {};\nconst str = (v) => (typeof v === 'string' ? v.trim() : '');\nconst message = str(b.message).slice(0, 2000);\nconst raw = str(b.phone) || str(b.email);\nconst errors = [];\nlet contact = null;\nif (!message) errors.push('message is required');\nif (!raw) errors.push('phone or email is required');\nelse if (raw.includes('@')) {\n  contact = raw.toLowerCase();\n  if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(contact)) errors.push('email looks invalid');\n} else {\n  const digits = raw.replace(/\\D/g, '');\n  if (digits.length < 8 || digits.length > 15) errors.push('phone must have 8-15 digits, with country code');\n  contact = '+' + digits;\n}\nreturn [{ json: errors.length ? { valid: false, errors } : { valid: true, lead: {\n  source: 'form', contact, contact_name: str(b.name).slice(0, 120) || null, message,\n  received_at: new Date().toISOString(), external_id: null,\n} } }];"
+      },
+      "id": "2b6a4e2d-7e18-4ab2-879d-fed97ab56d82",
+      "name": "Validate form",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "notes": "Requires a message and a phone (8-15 digits) or email; normalises the contact.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "08a3d24d-e343-4f13-8896-216a15ac8b13",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "0eb5bc64-f648-4af5-8b15-210ae2688ec0",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "notes": "Invalid bodies get a 400 with the reasons.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "aiopsLeadCore001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "fccc80b8-b886-4126-832d-53e5c58ebf4b",
+      "name": "Qualify lead (core)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        -100
+      ],
+      "notes": "Runs the shared lead core and waits for its result.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ lead_id: $json.lead_id, conversation_id: $json.conversation_id, status: $json.status, reply: $json.reply ?? ($json.status === 'attached' ? 'Thanks, we have added this to your conversation.' : null) }) }}",
+        "options": {}
+      },
+      "id": "538bdf14-ba4a-47fe-8dbb-e6a184de1014",
+      "name": "Reply to form",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        -100
+      ],
+      "notes": "Returns lead id, status and the reply text to the form.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.errors }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "9b49c030-e387-4af0-802b-a69ca59b838a",
+      "name": "Reject form",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        120
+      ],
+      "notes": "Answers 400 with the validation errors.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "content": "## Web form entry\nNo Meta account needed. POST JSON `{ name, phone or email, message }` to `/webhook/lead-form`; the response contains the reply. Example in the README, How to test.",
+        "height": 220,
+        "width": 380,
+        "color": 6
+      },
+      "id": "9bc1e3ad-39ba-4c04-88ba-9534a8ae29d2",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -120
+      ]
+    }
+  ],
+  "connections": {
+    "POST /webhook/lead-form": {
+      "main": [
+        [
+          {
+            "node": "Validate form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate form": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Qualify lead (core)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualify lead (core)": {
+      "main": [
+        [
+          {
+            "node": "Reply to form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "aiopsErrHandler0",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}
