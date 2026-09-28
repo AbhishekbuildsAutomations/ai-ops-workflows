@@ -76,7 +76,7 @@ services:
       - DIGEST_SHEETS_ENABLED=${DIGEST_SHEETS_ENABLED:-false}
       - DIGEST_SHEET_ID
       # Workflow 1: lead agent
-      - LLM_MODEL=${LLM_MODEL:-gemini-3.5-flash-lite}
+      - LLM_MODEL=${LLM_MODEL:-gemini-3.1-flash-lite}
       - LLM_FALLBACK_MODEL=${LLM_FALLBACK_MODEL:-gemma-4-26b-a4b-it}
       - HOT_LEAD_SCORE=${HOT_LEAD_SCORE:-70}
       - FOLLOWUP_HOURS=${FOLLOWUP_HOURS:-4}
