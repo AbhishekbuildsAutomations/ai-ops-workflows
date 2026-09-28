@@ -130,7 +130,11 @@ services:
     image: ngrok/ngrok:3
     profiles: [tunnel]
     restart: unless-stopped
-    command: http n8n:5678 --url ${NGROK_URL:-https://set-NGROK_URL-in-.env.ngrok-free.app}
+    # Without NGROK_URL, ngrok uses the account's own free dev domain.
+    command: http n8n:5678 ${NGROK_URL:+--url=${NGROK_URL}}
+    ports:
+      # Agent API / inspector (shows the public URL and live traffic). Localhost only.
+      - 127.0.0.1:4040:4040
     environment:
       - NGROK_AUTHTOKEN
     depends_on:
