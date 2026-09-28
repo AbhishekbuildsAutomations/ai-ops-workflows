@@ -62,18 +62,28 @@ export function onFailure(n, wf) {
   return parts.join(', ').replace(/^then /, '').replace(/^./, (c) => c.toUpperCase());
 }
 
-/** Depth-first from each trigger, following outputs in order: the order n8n v1 runs branches. */
+/** Execution order: a node is listed only after every node that feeds it (topological order),
+ *  ties broken by distance from the trigger, so each branch's steps sit next to the IF that starts
+ *  them and a node where branches rejoin comes after both. Sub-nodes (chat models) count as
+ *  feeding the chain they're attached to. */
 export function executionOrder(wf) {
   const nodes = wf.nodes.filter((n) => !isSticky(n));
   const byName = Object.fromEntries(nodes.map((n) => [n.name, n]));
-  const seen = new Set(); const out = [];
-  const visit = (name) => {
-    if (seen.has(name) || !byName[name]) return;
-    seen.add(name); out.push(byName[name]);
-    for (const branch of wf.connections[name]?.main ?? []) for (const c of branch ?? []) visit(c.node);
-  };
-  nodes.filter(isTrigger).sort((a, b) => a.position[1] - b.position[1]).forEach((t) => visit(t.name));
-  nodes.forEach((n) => visit(n.name)); // anything unreachable still gets listed
+  const next = (name) => Object.values(wf.connections[name] ?? {}).flat(2).filter(Boolean).map((c) => c.node).filter((x) => byName[x]);
+  const rank = new Map();
+  const bfs = (starts) => { const q = starts.filter((x) => !rank.has(x)); q.forEach((x) => rank.set(x, rank.size));
+    while (q.length) for (const m of next(q.shift())) if (!rank.has(m)) { rank.set(m, rank.size); q.push(m); } };
+  bfs(nodes.filter(isTrigger).sort((a, b) => a.position[1] - b.position[1]).map((t) => t.name));
+  nodes.forEach((n) => bfs([n.name]));
+  const indeg = Object.fromEntries(nodes.map((n) => [n.name, 0]));
+  nodes.forEach((n) => next(n.name).forEach((m) => indeg[m]++));
+  const out = []; const ready = nodes.filter((n) => !indeg[n.name]).map((n) => n.name);
+  while (ready.length) {
+    ready.sort((a, b) => rank.get(a) - rank.get(b));
+    const name = ready.shift(); out.push(byName[name]);
+    next(name).forEach((m) => { if (--indeg[m] === 0) ready.push(m); });
+  }
+  nodes.forEach((n) => { if (!out.includes(n)) out.push(n); }); // cycles, if any
   return out;
 }
 
@@ -118,6 +128,8 @@ export function dataStores(wf) {
     if (t === 'httpRequest') {
       const u = String(p.url ?? '');
       const hs = u.match(/\/crm\/(?:v\d+|[\d-]+)\/objects\/(\w+)/); if (hs) w.add(`HubSpot ${hs[1]}`);
+      const tw = u.match(/\/rest\/(people|opportunities|companies|notes|tasks)/);
+      if (tw) (p.method === 'GET' ? r : w).add(`Twenty CRM ${tw[1]}`);
       if (/graph\.facebook\.com/.test(u)) w.add('WhatsApp message (Graph API)');
     }
     if (t === 'telegram') w.add('Telegram chat `$env.TELEGRAM_CHAT_ID`');
@@ -182,7 +194,7 @@ pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;m
 .diagram{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center;overflow-x:auto}
 .diagram svg{max-width:none!important;height:auto} /* natural size; a wide diagram scrolls inside its box, never the page */
 table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
-td.n{color:var(--muted);width:2.2em}
+td.n{color:var(--muted);width:3em;white-space:nowrap}
 @media (max-width:700px){table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:6px 4px}td{border:0;padding:4px 10px}td::before{content:attr(data-label);display:block;color:var(--muted);font-size:.85rem;font-weight:600}td.n{width:auto}}
 ul{padding-left:1.3em}`;
 
