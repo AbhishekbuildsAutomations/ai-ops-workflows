@@ -99,15 +99,15 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: { lead_id: $json.lead_id, conversation_id: $json.conversation_id, status: $json.outcome, reply: null } }];"
+        "jsCode": "const i = $('Save message, find conversation').first().json;\nreturn [{ json: { lead_id: i.lead_id, conversation_id: i.conversation_id, status: i.outcome, reply: null,\n  handed_off: $('Hand off to owner').isExecuted && $('Hand off to owner').first().json.handed_off === true } }];"
       },
       "id": "f2d5ba81-0904-49f9-88b9-ec4550d2df06",
       "name": "Result (existing conversation)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
-        520
+        2420,
+        760
       ],
       "notes": "Returns \"attached\" or \"duplicate\" with no reply, so a burst of messages gets one answer.",
       "notesInFlow": true
@@ -688,7 +688,7 @@
     },
     {
       "parameters": {
-        "content": "## Lead core\nCalled by the form and WhatsApp workflows.\n\n1. `lead_ingest()` stores the message: **new** lead, **attached** to a recent conversation, or **duplicate** (Meta retry).\n2. New leads: prompt from `business-facts.json` → LLM (JSON) → validate → one retry with the errors → else `needs_human`. An LLM outage is logged to Workflow 0 and the run continues.\n3. Reply guard: no prices/discounts/promises unless they are in the facts.\n4. Save, reply on WhatsApp, alert the owner for hot / needs_human leads.",
+        "content": "## Lead core\nCalled by the form and WhatsApp workflows.\n\n1. `lead_ingest()` stores the message: **new** lead, **attached** to a recent conversation, or **duplicate** (Meta retry).\n2. New leads: prompt from `business-facts.json` → LLM (JSON) → validate → one retry with the errors → else `needs_human`. An LLM outage is logged to Workflow 0 and the run continues.\n3. Reply guard: no prices/discounts/promises unless they are in the facts.\n4. Save, reply on WhatsApp, alert the owner for hot / needs_human leads.\n5. Follow-up messages: hand off to the owner on Telegram, one fixed acknowledgement to the lead.",
         "height": 420,
         "width": 380,
         "color": 5
@@ -701,6 +701,239 @@
         -420,
         0
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1b1ed0f2-7b48-407d-a9e6-866bd596a21b",
+              "leftValue": "={{ $json.outcome === 'attached' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "85dabeec-6770-4535-83e8-f8f64b074035",
+      "name": "Follow-up message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        760
+      ],
+      "notes": "attached = the contact wrote again inside DEDUPE_MINUTES. duplicate = a Meta retry: stays silent.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The lead was qualified and answered by an earlier run; a person takes it from here.\n-- needs_human also stops the automated follow-up nudge. The acknowledgement is sent once per lead.\n-- A follow-up that arrives while the first message is still being qualified (status 'new') is only\n-- stored: handing off then would acknowledge before the real answer, and that run's save would\n-- overwrite needs_human. Spam is never handed off. (lead_ingest returns facts only for new leads,\n-- so the acknowledgement text is read here.)\nWITH cur AS (SELECT id, status NOT IN ('new', 'spam') AS ready FROM leads WHERE id = $1::bigint),\nf AS (SELECT coalesce(data->>'handoff_reply', '') AS t FROM business_facts WHERE id = 1),\nack AS (\n  INSERT INTO lead_messages (lead_id, direction, channel, body)\n  SELECT $1::bigint, 'out', 'whatsapp', f.t FROM f, cur\n  WHERE cur.ready AND $2 = 'whatsapp' AND f.t <> ''\n    AND NOT EXISTS (SELECT 1 FROM lead_messages WHERE lead_id = $1::bigint AND direction = 'out' AND body = f.t)\n  RETURNING id, body),\nupd AS (\n  UPDATE leads l SET status = 'needs_human', updated_at = now(),\n    last_outbound_at = CASE WHEN EXISTS (SELECT 1 FROM ack) THEN now() ELSE l.last_outbound_at END\n  FROM cur WHERE l.id = cur.id AND cur.ready\n  RETURNING l.id)\nSELECT l.id AS lead_id, cur.ready AS handed_off, l.contact_name, l.fit_score, l.intent, l.reply_sent AS first_reply,\n  (SELECT id FROM ack) AS ack_message_id, (SELECT body FROM ack) AS ack_text\nFROM leads l JOIN cur ON cur.id = l.id;",
+        "options": {
+          "queryReplacement": "={{ [ $json.lead_id, $('Normalise lead').first().json.source ] }}",
+          "connectionTimeout": 10
+        }
+      },
+      "id": "0ce51987-f9ee-4824-8c58-57395fe22fca",
+      "name": "Hand off to owner",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        640
+      ],
+      "notes": "Marks an answered lead needs_human and queues the one-time acknowledgement.",
+      "notesInFlow": true,
+      "credentials": {
+        "postgres": {
+          "id": null,
+          "name": "Ops ledger (Postgres)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "059cb22c-7565-4a20-a1ae-050dafb38938",
+              "leftValue": "={{ !!$json.ack_message_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "6e9f3683-c236-475a-a6ae-972df9e80277",
+      "name": "Send acknowledgement?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        640
+      ],
+      "notes": "Only the first follow-up on a WhatsApp lead gets one.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v26.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: $('Normalise lead').first().json.wa_id, type: 'text', text: { preview_url: false, body: $('Hand off to owner').item.json.ack_text } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "f0294f08-1901-4914-811c-6131ddf2a81d",
+      "name": "Send acknowledgement",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        540
+      ],
+      "notes": "Fixed text from business-facts.json (handoff_reply), so no LLM and no guard needed.",
+      "notesInFlow": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "WhatsApp Cloud API token"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE lead_messages SET delivered = $2::boolean WHERE id = $1::bigint RETURNING id, $2::boolean AS delivered;",
+        "options": {
+          "queryReplacement": "={{ [ $('Hand off to owner').item.json.ack_message_id, !$json.error ] }}",
+          "connectionTimeout": 10
+        }
+      },
+      "id": "50ebb285-ce31-41c7-8445-c2a85df601b1",
+      "name": "Record acknowledgement",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1980,
+        540
+      ],
+      "notes": "Marks the acknowledgement delivered or not.",
+      "notesInFlow": true,
+      "credentials": {
+        "postgres": {
+          "id": null,
+          "name": "Ops ledger (Postgres)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ (() => { const h = $('Hand off to owner').item.json; const l = $('Normalise lead').first().json;\n  const e = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n  const ack = $('Record acknowledgement').isExecuted ? ($('Record acknowledgement').item.json.delivered ? 'sent' : '⚠️ WhatsApp did not accept it') : 'already sent earlier';\n  return [\n    '💬 <b>Lead replied, over to you</b>',\n    '',\n    '<b>Name:</b> ' + e(h.contact_name || 'unknown') + ' (' + e(l.source) + ')',\n    '<b>Score:</b> ' + (h.fit_score ?? 'n/a') + ' · ' + e(h.intent ?? 'unqualified'),\n    '<b>Their message:</b> ' + e(l.message.slice(0, 300)),\n    '<b>Bot said earlier:</b> ' + e(h.first_reply || '(nothing)'),\n    '<b>Acknowledgement:</b> ' + (l.source === 'whatsapp' ? ack : 'n/a (form lead)'),\n    '<b>Lead #' + h.lead_id + '</b>',\n  ].join('\\n'); })() }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "9ba9b7be-5565-4374-a0ec-ff971e3fcf2f",
+      "name": "Forward to owner on Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2200,
+        640
+      ],
+      "notes": "Every follow-up message reaches the owner, with the lead context.",
+      "notesInFlow": true,
+      "credentials": {
+        "telegramApi": {
+          "id": null,
+          "name": "Ops alerts (Telegram bot)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7831b2ce-5559-42b2-9923-05dcbe7fa2e4",
+              "leftValue": "={{ $json.handed_off }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "fc5e322f-6404-4e3f-aebb-be575e0c062c",
+      "name": "Answered already?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        520
+      ],
+      "notes": "No: the first message is still being qualified, so this one is only stored.",
+      "notesInFlow": true
     }
   ],
   "connections": {
@@ -748,7 +981,7 @@
         ],
         [
           {
-            "node": "Result (existing conversation)",
+            "node": "Follow-up message?",
             "type": "main",
             "index": 0
           }
@@ -1003,6 +1236,104 @@
         [
           {
             "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Follow-up message?": {
+      "main": [
+        [
+          {
+            "node": "Hand off to owner",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Result (existing conversation)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hand off to owner": {
+      "main": [
+        [
+          {
+            "node": "Answered already?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send acknowledgement?": {
+      "main": [
+        [
+          {
+            "node": "Send acknowledgement",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Forward to owner on Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send acknowledgement": {
+      "main": [
+        [
+          {
+            "node": "Record acknowledgement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record acknowledgement": {
+      "main": [
+        [
+          {
+            "node": "Forward to owner on Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forward to owner on Telegram": {
+      "main": [
+        [
+          {
+            "node": "Result (existing conversation)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answered already?": {
+      "main": [
+        [
+          {
+            "node": "Send acknowledgement?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Result (existing conversation)",
             "type": "main",
             "index": 0
           }
