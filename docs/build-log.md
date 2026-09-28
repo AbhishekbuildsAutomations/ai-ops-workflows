@@ -189,3 +189,23 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
   - The chain's **fallback model** (n8n wraps it as LangChain `withFallbacks`) is `LLM_FALLBACK_MODEL` = `gemma-4-26b-a4b-it`: same key, 30 requests/min, 14.4K/day free, about 8 s per call.
   - Gemma prefixes its JSON with `<thought>…</thought>`, so the validator now strips that and parses the outermost `{…}`.
 - **Trade-off:** when the primary is down, every lead pays the 20 s timeout before the fallback runs. The eval latency shows this honestly.
+
+### 30. The eval found the prompt was the problem, and the model choice
+- **Run 1:** hot-lead precision 40%. The model scored an angry existing customer 100 and "how much?" 90. The prompt said "how likely this lead becomes a paying customer" but never defined a scale, so the model rewarded anyone engaged.
+  **Fix:** a rubric in the prompt (70+ = wants to book a service we sell, in our area, soon; support = 0–9). Labels unchanged.
+- **Run 1, Gemini 3.5 Flash-Lite:** answered 0 of 33 runs; everything came from the Gemma fallback. At the user's request, "fast and cheap":
+  - **Pricing page** (<!-- doc --> https://ai.google.dev/gemini-api/docs/pricing, 2026-09-24): 3.1 Flash-Lite is the cheapest current model.
+  - **Live test, 5 calls each:** 3.1 Flash-Lite 4/5 in 4–11 s; 3.5 Flash-Lite, `flash-lite-latest` and 3.7 Flash 0/5.
+  - **Switched** `LLM_MODEL` to `gemini-3.1-flash-lite`; primary timeout 15 s.
+- **Run 2:** intent 93.3%, schema-valid 100% on the first try, hot precision 71.4% and recall 71.4%, median 8.5 s. Remaining misses are written up in the README (office contract, heavy typos, "next month" scored hot).
+- **Lesson:** the eval paid for itself. Without it, 9 of 15 Telegram alerts would have been false, and nobody would have known why.
+
+---
+
+## What I should be able to explain about Workflow 1
+
+1. **One core, two doors:** WhatsApp (Meta verification, HMAC signature over the raw body, retries deduped by message id) and a plain web form both call one sub-workflow. `lead_ingest()` uses a per-contact advisory lock, so a burst of messages makes one lead (proven: 4–5 duplicates without the lock, 1 with).
+2. **An LLM output is untrusted input:** it's validated in code against the schema, retried once with the errors, then `needs_human`. A reply guard blocks any price, discount or promise that isn't in `business-facts.json`. Prompt injection was resisted 2/2, and the guard caught one "guarantee".
+3. **Designed for free-tier failure:** the primary has a 15 s timeout, then a Gemma fallback on the same key. If both are down, the lead is still stored, still answered safely, and logged to Workflow 0's ledger. A missing credential would kill a whole n8n run, so bootstrap creates placeholders.
+4. **Measured, not claimed:** a 30-message labelled eval. Run 1 exposed an undefined `fit_score` (40% hot precision); a rubric took it to 71%. Both runs and every remaining miss are in the README.
+5. **Honest limits:** the WhatsApp test number only reaches verified numbers, replies are billed from 1 Oct 2026, 24-hour window (template_needed), free-tier latency spikes, and support messages don't alert anyone yet.

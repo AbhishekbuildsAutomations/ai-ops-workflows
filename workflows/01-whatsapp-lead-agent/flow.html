@@ -34,50 +34,52 @@ ul{padding-left:1.3em}</style></head>
   n5[&quot;Build prompt&quot;]
   n6[&quot;Qualify (LLM)&quot;]
   n7[&quot;Chat model&quot;]
-  n8[&quot;Validate answer&quot;]
-  n9{&quot;Valid?&quot;}
-  n10[&quot;Build retry prompt&quot;]
-  n11[&quot;Qualify again (LLM)&quot;]
-  n12[&quot;Chat model (retry)&quot;]
-  n13[&quot;Validate retry&quot;]
-  n14[&quot;LLM call failed&quot;]
-  n15[&quot;Log LLM failure to ledger&quot;]
-  n16[&quot;Decide reply&quot;]
-  n17[(&quot;Save outcome&quot;)]
-  n18[&quot;Sync to CRM&quot;]
-  n19{&quot;Reply on WhatsApp?&quot;}
-  n20[&quot;Send WhatsApp reply&quot;]
-  n21[(&quot;Record delivery&quot;)]
-  n22{&quot;Notify owner?&quot;}
-  n23[&quot;Alert owner on Telegram&quot;]
-  n24[&quot;Result&quot;]
+  n8[&quot;Fallback model&quot;]
+  n9[&quot;Validate answer&quot;]
+  n10{&quot;Valid?&quot;}
+  n11[&quot;Build retry prompt&quot;]
+  n12[&quot;Qualify again (LLM)&quot;]
+  n13[&quot;Chat model (retry)&quot;]
+  n14[&quot;Fallback model (retry)&quot;]
+  n15[&quot;Validate retry&quot;]
+  n16[&quot;LLM call failed&quot;]
+  n17[&quot;Log LLM failure to ledger&quot;]
+  n18[&quot;Decide reply&quot;]
+  n19[(&quot;Save outcome&quot;)]
+  n20[&quot;Sync to CRM&quot;]
+  n21{&quot;Reply on WhatsApp?&quot;}
+  n22[&quot;Send WhatsApp reply&quot;]
+  n23[(&quot;Record delivery&quot;)]
+  n24{&quot;Notify owner?&quot;}
+  n25[&quot;Alert owner on Telegram&quot;]
+  n26[&quot;Result&quot;]
   n0 --&gt; n1
   n1 --&gt; n2
   n2 --&gt; n3
   n3 --&gt;|true| n5
   n3 --&gt;|false| n4
   n5 --&gt; n6
-  n6 --&gt; n8
-  n6 --&gt;|error| n14
-  n8 --&gt; n9
-  n9 --&gt;|true| n16
-  n9 --&gt;|false| n10
-  n10 --&gt; n11
-  n11 --&gt; n13
-  n11 --&gt;|error| n14
-  n13 --&gt; n16
-  n14 --&gt; n15
-  n14 --&gt; n16
+  n6 --&gt; n9
+  n6 --&gt;|error| n16
+  n9 --&gt; n10
+  n10 --&gt;|true| n18
+  n10 --&gt;|false| n11
+  n11 --&gt; n12
+  n12 --&gt; n15
+  n12 --&gt;|error| n16
+  n15 --&gt; n18
   n16 --&gt; n17
-  n17 --&gt; n18
-  n17 --&gt; n19
-  n19 --&gt;|true| n20
-  n19 --&gt;|false| n22
-  n20 --&gt; n21
-  n21 --&gt; n22
-  n22 --&gt;|true| n23
-  n22 --&gt;|false| n24
+  n16 --&gt; n18
+  n18 --&gt; n19
+  n19 --&gt; n20
+  n19 --&gt; n21
+  n21 --&gt;|true| n22
+  n21 --&gt;|false| n24
+  n22 --&gt; n23
   n23 --&gt; n24
+  n24 --&gt;|true| n25
+  n24 --&gt;|false| n26
+  n25 --&gt; n26
   classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
   class n0 trig</pre></div>
 <h3>Steps, in execution order</h3>
@@ -88,30 +90,32 @@ ul{padding-left:1.3em}</style></head>
 <tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>New lead?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Only brand-new leads are qualified; follow-on messages just join their conversation.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
 <tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Build prompt</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Builds the qualification prompt from business-facts.json and the lead message.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
 <tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Result (existing conversation)</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Returns &quot;attached&quot; or &quot;duplicate&quot; with no reply, so a burst of messages gets one answer.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Chat model</strong></td><td data-label="Type">Lm Chat Open Ai</td><td data-label="What it does">OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">8</td><td data-label="Node"><strong>Qualify (LLM)</strong></td><td data-label="Type">Chain Llm</td><td data-label="What it does">Asks the model for intent, budget, urgency, fit score, missing info, a reply draft and a reason.</td><td data-label="On failure">Retries up to 3× (5s apart), then continues on the error output</td></tr>
-<tr><td class="n" data-label="#">9</td><td data-label="Node"><strong>Validate answer</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Parses the JSON and checks every field against the schema; never throws.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">10</td><td data-label="Node"><strong>Valid?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Valid answers go straight on; invalid ones get one retry.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">11</td><td data-label="Node"><strong>Build retry prompt</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Adds the validation errors and the rejected answer to the prompt.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">12</td><td data-label="Node"><strong>Chat model (retry)</strong></td><td data-label="Type">Lm Chat Open Ai</td><td data-label="What it does">OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">13</td><td data-label="Node"><strong>Qualify again (LLM)</strong></td><td data-label="Type">Chain Llm</td><td data-label="What it does">Second and last model call, with the errors from the first.</td><td data-label="On failure">Retries up to 3× (5s apart), then continues on the error output</td></tr>
-<tr><td class="n" data-label="#">14</td><td data-label="Node"><strong>LLM call failed</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Model unreachable after retries: shapes the error for Workflow 0 and marks the answer invalid.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">15</td><td data-label="Node"><strong>Log LLM failure to ledger</strong></td><td data-label="Type">Execute Workflow: call a sub-workflow</td><td data-label="What it does">Sends the failure to Workflow 0 (failure_ledger + Telegram) without stopping this run.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">16</td><td data-label="Node"><strong>Validate retry</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Same checks; if this fails too the lead becomes needs_human.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">17</td><td data-label="Node"><strong>Decide reply</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Chooses replied / no_reply / spam / needs_human and runs the reply guard against business-facts.json.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">18</td><td data-label="Node"><strong>Save outcome</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Writes the qualification and status to leads, and the reply (if any) to lead_messages.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">19</td><td data-label="Node"><strong>Sync to CRM</strong></td><td data-label="Type">Execute Workflow: call a sub-workflow</td><td data-label="What it does">Starts the CRM sync in the background; it checks CRM_ENABLED itself.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">20</td><td data-label="Node"><strong>Reply on WhatsApp?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Form replies go back in the HTTP response; WhatsApp replies are sent here.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">21</td><td data-label="Node"><strong>Send WhatsApp reply</strong></td><td data-label="Type">HTTP Request: POST</td><td data-label="What it does">Sends the reply through the WhatsApp Cloud API (Graph v26.0).</td><td data-label="On failure">Retries up to 3× (3s apart), then continues; the error is passed on as data</td></tr>
-<tr><td class="n" data-label="#">22</td><td data-label="Node"><strong>Record delivery</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Marks the WhatsApp message delivered, or flips the lead to needs_human if Meta refused it.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">23</td><td data-label="Node"><strong>Notify owner?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Hot leads (score &gt;= HOT_LEAD_SCORE), needs_human leads and failed WhatsApp sends alert the owner.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">24</td><td data-label="Node"><strong>Alert owner on Telegram</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the owner name, source, score, reason and the reply that went out.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
-<tr><td class="n" data-label="#">25</td><td data-label="Node"><strong>Result</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Returns lead id, status and the reply to the caller.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Chat model</strong></td><td data-label="Type">Lm Chat Open Ai</td><td data-label="What it does">OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL. 15 s timeout, then the fallback takes over.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">8</td><td data-label="Node"><strong>Fallback model</strong></td><td data-label="Type">Lm Chat Open Ai</td><td data-label="What it does">Used only if the main model errors or times out (free tiers get &quot;high demand&quot; 503s): LLM_FALLBACK_MODEL, same credential.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">9</td><td data-label="Node"><strong>Qualify (LLM)</strong></td><td data-label="Type">Chain Llm</td><td data-label="What it does">Asks the model for intent, budget, urgency, fit score, missing info, a reply draft and a reason.</td><td data-label="On failure">Retries up to 2× (5s apart), then continues on the error output</td></tr>
+<tr><td class="n" data-label="#">10</td><td data-label="Node"><strong>Validate answer</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Parses the JSON and checks every field against the schema; never throws.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">11</td><td data-label="Node"><strong>Valid?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Valid answers go straight on; invalid ones get one retry.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">12</td><td data-label="Node"><strong>Build retry prompt</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Adds the validation errors and the rejected answer to the prompt.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">13</td><td data-label="Node"><strong>Chat model (retry)</strong></td><td data-label="Type">Lm Chat Open Ai</td><td data-label="What it does">OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL. 15 s timeout, then the fallback takes over.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">14</td><td data-label="Node"><strong>Fallback model (retry)</strong></td><td data-label="Type">Lm Chat Open Ai</td><td data-label="What it does">Used only if the main model errors or times out (free tiers get &quot;high demand&quot; 503s): LLM_FALLBACK_MODEL, same credential.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">15</td><td data-label="Node"><strong>Qualify again (LLM)</strong></td><td data-label="Type">Chain Llm</td><td data-label="What it does">Second and last model call, with the errors from the first.</td><td data-label="On failure">Retries up to 2× (5s apart), then continues on the error output</td></tr>
+<tr><td class="n" data-label="#">16</td><td data-label="Node"><strong>LLM call failed</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Model unreachable after retries: shapes the error for Workflow 0 and marks the answer invalid.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">17</td><td data-label="Node"><strong>Log LLM failure to ledger</strong></td><td data-label="Type">Execute Workflow: call a sub-workflow</td><td data-label="What it does">Sends the failure to Workflow 0 (failure_ledger + Telegram) without stopping this run.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">18</td><td data-label="Node"><strong>Validate retry</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Same checks; if this fails too the lead becomes needs_human.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">19</td><td data-label="Node"><strong>Decide reply</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Chooses replied / no_reply / spam / needs_human and runs the reply guard against business-facts.json.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">20</td><td data-label="Node"><strong>Save outcome</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Writes the qualification and status to leads, and the reply (if any) to lead_messages.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">21</td><td data-label="Node"><strong>Sync to CRM</strong></td><td data-label="Type">Execute Workflow: call a sub-workflow</td><td data-label="What it does">Starts the CRM sync in the background; it checks CRM_ENABLED itself.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">22</td><td data-label="Node"><strong>Reply on WhatsApp?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Form replies go back in the HTTP response; WhatsApp replies are sent here.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">23</td><td data-label="Node"><strong>Send WhatsApp reply</strong></td><td data-label="Type">HTTP Request: POST</td><td data-label="What it does">Sends the reply through the WhatsApp Cloud API (Graph v26.0).</td><td data-label="On failure">Retries up to 3× (3s apart), then continues; the error is passed on as data</td></tr>
+<tr><td class="n" data-label="#">24</td><td data-label="Node"><strong>Record delivery</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Marks the WhatsApp message delivered, or flips the lead to needs_human if Meta refused it.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">25</td><td data-label="Node"><strong>Notify owner?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Hot leads (score &gt;= HOT_LEAD_SCORE), needs_human leads and failed WhatsApp sends alert the owner.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">26</td><td data-label="Node"><strong>Alert owner on Telegram</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the owner name, source, score, reason and the reply that went out.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
+<tr><td class="n" data-label="#">27</td><td data-label="Node"><strong>Result</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Returns lead id, status and the reply to the caller.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
 </tbody></table>
 <h3>Where data lives</h3>
 <div class="card"><strong>Writes</strong><ul><li>Postgres table <code>leads</code></li><li>Postgres table <code>lead_messages</code></li><li>WhatsApp message (Graph API)</li><li>Telegram chat <code>$env.TELEGRAM_CHAT_ID</code></li></ul><strong>Reads</strong><ul><li>Postgres table <code>lead_ingest</code></li><li>Postgres table <code>upd</code></li><li>Postgres table <code>msg</code></li><li>Postgres table <code>m</code></li></ul></div>
 <h3>Configuration (names only)</h3>
-<div class="card"><strong>Env vars</strong><ul><li><code>DEDUPE_MINUTES</code></li><li><code>HOT_LEAD_SCORE</code></li><li><code>LLM_MODEL</code></li><li><code>N8N_EDITOR_BASE_URL</code></li><li><code>TELEGRAM_CHAT_ID</code></li><li><code>WHATSAPP_PHONE_NUMBER_ID</code></li></ul><strong>n8n credentials</strong><ul><li>Ops ledger (Postgres) (<code>postgres</code>)</li><li>LLM (OpenAI-compatible) (<code>openAiApi</code>)</li><li>WhatsApp Cloud API token (<code>httpHeaderAuth</code>)</li><li>Ops alerts (Telegram bot) (<code>telegramApi</code>)</li></ul></div>
+<div class="card"><strong>Env vars</strong><ul><li><code>DEDUPE_MINUTES</code></li><li><code>HOT_LEAD_SCORE</code></li><li><code>LLM_FALLBACK_MODEL</code></li><li><code>LLM_MODEL</code></li><li><code>N8N_EDITOR_BASE_URL</code></li><li><code>TELEGRAM_CHAT_ID</code></li><li><code>WHATSAPP_PHONE_NUMBER_ID</code></li></ul><strong>n8n credentials</strong><ul><li>Ops ledger (Postgres) (<code>postgres</code>)</li><li>LLM (OpenAI-compatible) (<code>openAiApi</code>)</li><li>WhatsApp Cloud API token (<code>httpHeaderAuth</code>)</li><li>Ops alerts (Telegram bot) (<code>telegramApi</code>)</li></ul></div>
 <h2>01 · Lead CRM sync (Twenty)</h2>
 <p class="meta"><code>workflow-lead-crm-sync.json</code> · error workflow <code>aiopsErrHandler0</code></p>
 <div class="diagram"><pre class="mermaid">flowchart TD
@@ -287,7 +291,7 @@ node workflows/01-whatsapp-lead-agent/test/fake-whatsapp.mjs &quot;Hi, need a 3B
 #    -&gt; lead is needs_human, the form still answers, and failure_ledger gets a row
 LLM_MODEL=no-such-model docker compose up -d n8n
 
-# 6. The eval (30 labelled messages, about 5 minutes on the free tier)
+# 6. The eval (30 labelled messages, about 10 minutes on the free tier)
 node workflows/01-whatsapp-lead-agent/eval/run-eval.mjs</code></pre>
 <p>The follow-up workflow can be run on demand: open <strong>01 · Lead follow-up</strong> in n8n and click <strong>Execute workflow</strong>.</p>
 <p class="meta">Generated by <code>scripts/build-flow-html.mjs</code> from the workflow JSON and README. Do not edit by hand.</p>
