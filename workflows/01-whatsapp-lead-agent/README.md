@@ -13,7 +13,7 @@ Every inbound message, from WhatsApp or a web form, is stored, qualified by an L
 1. **Two entry points, one flow.** The WhatsApp Cloud API webhook (verification + signature check) and a plain JSON web form both call the same **lead core** sub-workflow.
 2. **Store and dedupe.** `lead_ingest()` (SQL) takes a per-contact lock, then files each message:
    - a **duplicate**: the same WhatsApp message id seen before (Meta retries for up to 7 days);
-   - **attached**: the same contact wrote within `DEDUPE_MINUTES`, so it joins that conversation and gets no second reply;
+   - **attached**: the same contact wrote again within `DEDUPE_MINUTES`, so it joins that conversation and is handed to the owner (step 8);
    - a **new** lead.
 3. **Qualify.** An LLM returns `intent, budget_signal, urgency, fit_score, missing_info[], reply_draft, reason`.
    - A Code node validates every field.
@@ -26,6 +26,7 @@ Every inbound message, from WhatsApp or a web form, is stored, qualified by an L
 5. **Store.** `leads` and `lead_messages` in Postgres, plus a person and a deal in **Twenty CRM** (free and open source, running in the same compose). `CRM_ENABLED=false` skips the CRM.
 6. **Notify.** Hot leads (`fit_score ≥ HOT_LEAD_SCORE`), `needs_human` leads and failed WhatsApp sends go to the owner on Telegram, reusing Workflow 0's bot and `$env.TELEGRAM_CHAT_ID`.
 7. **Follow up once.** Every 30 minutes, leads we replied to `FOLLOWUP_HOURS` ago with no answer since are claimed and get one follow-up. Outside WhatsApp's 24-hour window they are marked `template_needed` and nothing is sent.
+8. **Hand off follow-ups.** Only a contact's first message is qualified by the LLM. Once it has been answered, each later message in the same conversation is forwarded to the owner on Telegram, the lead becomes `needs_human` (so no automated nudge), and the customer gets one fixed acknowledgement (`handoff_reply` in `business-facts.json`). A message that arrives while the first one is still being qualified is only stored, so the acknowledgement can never arrive before the real answer.
 
 ```mermaid
 flowchart LR
@@ -35,7 +36,8 @@ flowchart LR
     VAL --> CORE
     subgraph CORE["Lead core (sub-workflow)"]
         ING[("lead_ingest()<br/>lock · dedupe · store")] -->|new| P[Prompt from business-facts.json]
-        ING -->|attached / duplicate| R0[No second reply]
+        ING -->|duplicate| R0[Silent]
+        ING -->|attached, already answered| HO[needs_human · one fixed ack · Telegram forward]
         P --> L1[LLM: JSON] --> V1{valid?}
         V1 -->|no| L2[LLM retry with errors] --> V2{valid?}
         V1 -->|yes| D
@@ -112,17 +114,21 @@ WhatsApp needs a public HTTPS URL, so you set up a tunnel first, then the Meta a
    ```
 4. Run `./scripts/bootstrap.sh`.
 
-**Meta app** ([get started](https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started)):
-1. At developers.facebook.com, go to **My Apps → Create App**, pick the use case **Connect with customers through WhatsApp**, and create it.
-2. Go to **WhatsApp → API Setup**. Meta creates a free test number. Under **To**, add your own WhatsApp number and enter the code Meta sends you. The test number can only message verified numbers.
+**Meta app** ([get started](https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started)). Paths are from Meta's dashboard as of 2026-09-28:
+1. At developers.facebook.com, go to **My Apps → Create App**, pick the use case **Connect with customers through WhatsApp**, and attach it to a business portfolio. A brand-new portfolio may be refused ("Business is not allowed to claim App"); an older one worked.
+2. Go to **Use cases → Customize → Step 1. Try it out**. Meta creates a free test number. Under **To → Manage phone number list**, add your own WhatsApp number and enter the code it sends. The test number can only message verified numbers (up to 5).
 3. Copy the **Phone number ID** into `WHATSAPP_PHONE_NUMBER_ID`.
-4. Click **Generate access token**. Paste it into the n8n credential **WhatsApp Cloud API token** (Header Auth: name `Authorization`, value `Bearer <token>`), or into `WHATSAPP_ACCESS_TOKEN` before running bootstrap. The temporary token expires quickly. For a permanent one: Business Settings → System users → generate a token with `whatsapp_business_messaging`.
-5. Go to **App settings → Basic**. Copy the **App secret** into `WHATSAPP_APP_SECRET`, and set any random string as `WHATSAPP_VERIFY_TOKEN`. Re-run bootstrap.
-6. Go to **WhatsApp → Configuration → Webhook → Edit**.
-   - Callback URL: `https://<your-domain>/webhook/whatsapp`.
-   - Verify token: your `WHATSAPP_VERIFY_TOKEN`.
-   - Click **Verify and save**, then **subscribe to `messages`**.
-7. Send a WhatsApp message from your phone to the test number.
+4. **Access token.** The one on that page expires in about an hour. For a permanent one: business.facebook.com → **Settings → Users → System users → Add** (Admin) → **Assign assets → your app** (Manage app) → **Generate token**, expiry **Never**, permissions `business_management`, `whatsapp_business_management`, `whatsapp_business_messaging` ([docs](https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens)). Put it in `WHATSAPP_ACCESS_TOKEN`.
+5. Go to **App settings → Basic**. Copy the **App secret** into `WHATSAPP_APP_SECRET`, and set any random string as `WHATSAPP_VERIFY_TOKEN`. Run `./scripts/bootstrap.sh`.
+6. Go to **Use cases → Customize → Step 2. Production setup → Configure Webhooks**.
+   - Callback URL: `https://<your-domain>/webhook/whatsapp`; Verify token: your `WHATSAPP_VERIFY_TOKEN` (not the app secret). Click **Verify and save**.
+   - `messages` gets subscribed automatically. Its **Test** button sends a sample message through the whole flow.
+7. **Subscribe the app to your WhatsApp Business Account.** Without this, only Meta's own test app is subscribed and real messages never arrive (the dashboard Test still works). The WABA ID is on the Step 1 page:
+   ```bash
+   curl -X POST "https://graph.facebook.com/v26.0/<WABA_ID>/subscribed_apps" -H "Authorization: Bearer $WHATSAPP_ACCESS_TOKEN"
+   ```
+8. **Publish the app.** An unpublished app only receives dashboard test webhooks. Publishing needs a privacy policy URL and a category (App settings → Basic); this repo uses [PRIVACY.md](../../PRIVACY.md). Then **Publish → Publish**.
+9. Send a WhatsApp message from your phone to the test number.
 
 ## How to test
 
@@ -189,10 +195,11 @@ _Pending: WhatsApp chat on a phone (number blurred), Telegram hot-lead alert, Tw
 
 ## Known limits
 
-- **WhatsApp test number:** it can only message the handful of numbers you verify in the Meta dashboard. Search results cite 5, but the current Meta page doesn't state the number.
+- **WhatsApp test number:** it can only message up to 5 numbers you verify in the Meta dashboard.
+- **One AI reply per conversation:** only the first message is qualified and answered by the LLM. Later messages get a fixed acknowledgement and go to a human, so a question like "when are you free?" is not answered by the bot (it has no calendar, and an LLM would invent slots the reply guard doesn't catch).
 - **Paid replies from 1 Oct 2026:** Meta charges per service message from that date, and says it stops delivering service messages for businesses with no payment method on file by 30 Sep 2026 ([pricing](https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing/non-template-messages/)). Whether the test number is exempt isn't documented. If replies stop arriving, add a payment method. A failed send is recorded (`delivered = false`) and alerts the owner.
 - **24-hour customer service window:** free-form replies are only allowed within 24 hours of the customer's last message. Outside it, the follow-up only records `template_needed`; sending approved templates is not built.
-- **LLM free tier:** 15 requests/min and 500/day on Gemini 3.1 Flash-Lite (account-specific), with Gemma 4 as the fallback. Free-tier Gemini returns `503 high demand` at busy times, which costs up to 15 s per lead before the fallback answers. If both are down, the lead becomes `needs_human`, gets the safe reply, and the failure goes to `failure_ledger`. Free-tier data may be used by Google outside the EEA, UK and Switzerland.
+- **LLM free tier:** 15 requests/min and 500/day on Gemini 3.1 Flash-Lite (account-specific), with Gemma 4 as the fallback. Free-tier Gemini returns `503 high demand` at busy times, which costs up to 15 s per lead before the fallback answers. In the live test on 2026-09-28, 2 of 4 real messages hit `Service unavailable` on both models. If both are down, the lead becomes `needs_human`, gets the safe reply, and the failure goes to `failure_ledger`. Free-tier data may be used by Google outside the EEA, UK and Switzerland.
 - **Form leads can't be followed up automatically:** there is no outbound email or SMS channel, so the owner gets a Telegram nudge instead.
 - **Phone numbers must include the country code:** there's no default country, and `+` plus 8–15 digits is required.
 - **The Meta app secret is an env var:** the signature check runs in a Code node, which can't read n8n credentials, so any workflow editor can read it. If it's unset, the signature isn't checked, and the run records that.

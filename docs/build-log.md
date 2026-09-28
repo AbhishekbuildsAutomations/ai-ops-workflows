@@ -215,6 +215,21 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
 - **Fix:** pin `twentycrm/twenty-app-dev:v2.42.6`, the last release before it. Downgrading onto a database v2.43 had already migrated isn't safe, so the demo volumes (seed data plus test records only) were recreated. The seeded API key is unchanged; UI 200 and API 200, and a lead sent through the public URL synced to a new person and deal.
 - **Lesson:** the automated checks only covered the API the workflow uses. A reviewer opens the UI first, so check that too.
 
+### 33. Real WhatsApp: three things the dashboard doesn't tell you
+- **Verify token rejected:** Meta's GET reached n8n (ngrok showed `facebookplatform/1.0` → 403), so the tunnel was fine. The app secret had been pasted as the verify token. Correct value → 200.
+- **Dashboard Test works, real messages don't:** the Configure Webhooks page warns that an unpublished app only receives dashboard test webhooks. An n8n community thread (<!-- doc --> https://community.n8n.io/t/error-receiving-messages-in-n8n-whatsapp-trigger-new-meta-apps-set-up-api-vs-test-api-webhook-test-ok-live-messages-fail/233724) pointed to a second cause. `GET /<WABA_ID>/subscribed_apps` listed only Meta's internal "WA DevX Webhook Events 1P App", not ours.
+  **Fix:** `POST /<WABA_ID>/subscribed_apps`, then publish (needs a privacy policy URL, so [PRIVACY.md](../PRIVACY.md) was added). After that, real `sent`/`delivered` statuses and inbound messages arrived.
+- **Token expiry:** `debug_token` showed the dashboard token expiring within the hour. Replaced with a system-user token (`expires_at: 0`), and checked that n8n's credential matches `.env` without printing it.
+- **Result:** a real message from a phone was scored `buy`/90, got a guarded reply quoting the facts price (₹3,499), triggered the Telegram hot-lead alert and synced to Twenty. About 20 s end to end, 18 s of it the Gemini call.
+
+### 34. Follow-up messages went nowhere
+- **Found by using it:** after the first reply, "Okay - schedule" was stored and nothing else happened. By design, attached messages got no reply, but the owner wasn't told either, so a lead ready to book got silence.
+- **Fix (chosen with the user):** hand off, don't converse. Once the first message has been answered, each follow-up is forwarded to Telegram, the lead becomes `needs_human` (which also stops the automated nudge), and the customer gets one fixed acknowledgement from `business-facts.json`.
+- **Bug 1:** the acknowledgement was empty. `lead_ingest()` only returns `facts` for new leads. The handoff SQL now reads `handoff_reply` from `business_facts` itself.
+- **Bug 2 (race):** with a slow LLM (40 s+), a follow-up sent during qualification got "someone will confirm" before the real answer, and the first run's save then overwrote `needs_human` with `replied`. Handoff now only happens when the lead's status is no longer `new` (and never for spam). Earlier follow-ups are only stored.
+- **Verified:** fake-WhatsApp run with 4 messages: the mid-qualification message was stored only, then the answer, exactly one acknowledgement, and a Telegram forward for each later message. Then a real follow-up from a phone got the acknowledgement.
+- **Lesson:** a fixed acknowledgement reads as a template, and that's the trade-off. It can't promise a time slot the business doesn't have.
+
 ---
 
 ## What I should be able to explain about Workflow 1
