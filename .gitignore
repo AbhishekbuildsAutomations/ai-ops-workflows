@@ -1,0 +1,11 @@
+# secrets
+.env
+# local n8n data, if anyone runs n8n outside Docker
+.n8n/
+n8n-data/
+# anything exported with credentials in it
+*credentials*.json
+!**/credentials.example.json
+# raw export before stripping
+.export-tmp/
+.DS_Store
