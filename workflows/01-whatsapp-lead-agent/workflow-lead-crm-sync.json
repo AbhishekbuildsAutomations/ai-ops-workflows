@@ -1,0 +1,576 @@
+{
+  "id": "aiopsLeadCrm0001",
+  "name": "01 · Lead CRM sync (Twenty)",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "2c4bb203-07cf-4c3a-8ad1-2a4652da3235",
+      "name": "Lead to sync",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Receives { lead_id } from the lead core, in the background.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dcd5c4bf-858c-484a-8f93-0f4af52fc81d",
+              "leftValue": "={{ $env.CRM_ENABLED === 'true' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "cc9ee7f3-34e2-4a7e-84a3-ee4fb41a3db6",
+      "name": "CRM enabled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ],
+      "notes": "CRM_ENABLED=false skips the CRM entirely; Postgres already has the lead.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, source, contact, contact_name, first_message, status, intent, fit_score, urgency, reason FROM leads WHERE id = $1::bigint AND status <> 'spam';",
+        "options": {
+          "queryReplacement": "={{ [ $json.lead_id ] }}",
+          "connectionTimeout": 10
+        }
+      },
+      "id": "69492466-e8c5-4d1a-8a9f-a2cb5d1be6a6",
+      "name": "Load lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "notes": "Reads the saved lead; spam is never sent to the CRM.",
+      "notesInFlow": true,
+      "credentials": {
+        "postgres": {
+          "id": null,
+          "name": "Ops ledger (Postgres)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.TWENTY_URL || \"http://twenty:2020\").replace(/\\/$/, \"\") + \"/rest/people\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter",
+              "value": "={{ $json.contact.includes('@')\n  ? 'emails.primaryEmail[eq]:\"' + $json.contact + '\"'\n  : 'phones.primaryPhoneNumber[in]:[' + [6, 7, 8, 9, 10, 11, 12].filter((k) => k < $json.contact.length - 1).map((k) => '\"' + $json.contact.replace(/\\D/g, '').slice(-k) + '\"').join(',') + ']' }}"
+            },
+            {
+              "name": "limit",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "id": "9ad4aef2-6833-435e-8434-8eaa0b5fbbe1",
+      "name": "Find person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "notes": "Twenty stores phones as calling code + national number, so this searches every possible national-number suffix.",
+      "notesInFlow": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "Twenty CRM API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Keep only an exact match: calling code + national number must equal the full phone.\nconst lead = $('Load lead').item.json;\nconst people = $json.data?.people ?? [];\nconst digits = (s) => String(s ?? '').replace(/\\D/g, '');\nconst match = people.find((p) => lead.contact.includes('@')\n  ? p.emails?.primaryEmail?.toLowerCase() === lead.contact\n  : digits(p.phones?.primaryPhoneCallingCode) + digits(p.phones?.primaryPhoneNumber) === digits(lead.contact));\nreturn { json: { ...lead, person_id: match?.id ?? null } };"
+      },
+      "id": "27b50379-40e6-4fb1-8c74-feddd8407398",
+      "name": "Pick matching person",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "notes": "Chooses the person whose full number or email matches exactly.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "672fbc2e-41f4-459b-8e96-035643027cde",
+              "leftValue": "={{ !!$json.person_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "67af5b12-ce41-4bce-8e6a-9448c183ab54",
+      "name": "Person exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ],
+      "notes": "Existing people are reused; new contacts are created.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.TWENTY_URL || \"http://twenty:2020\").replace(/\\/$/, \"\") + \"/rest/people\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign(\n  { name: { firstName: ($json.contact_name || 'WhatsApp').split(' ')[0], lastName: ($json.contact_name || 'lead').split(' ').slice(1).join(' ') || 'lead' } },\n  $json.contact.includes('@') ? { emails: { primaryEmail: $json.contact } } : { phones: { primaryPhoneNumber: $json.contact } })) }}"
+      },
+      "id": "e128e910-b54a-42af-81e0-1a4fb4a69038",
+      "name": "Create person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        120
+      ],
+      "notes": "Creates the person with name and email or phone.",
+      "notesInFlow": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "Twenty CRM API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const p = $('Pick matching person').item.json;\nreturn { json: { ...p, person_id: p.person_id ?? $json.data?.createPerson?.id } };"
+      },
+      "id": "6415e607-896f-4b33-8327-530cbfcb6f3a",
+      "name": "Person id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "notes": "Carries the found or newly created person id forward.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.TWENTY_URL || \"http://twenty:2020\").replace(/\\/$/, \"\") + \"/rest/opportunities\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter",
+              "value": "={{ 'and(pointOfContactId[eq]:\"' + $json.person_id + '\",stage[neq]:\"CUSTOMER\")' }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        }
+      },
+      "id": "0e2b52a2-3a1a-424a-8fcd-761a91d61970",
+      "name": "Find open deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        0
+      ],
+      "notes": "Looks for an opportunity for this person that is not already won.",
+      "notesInFlow": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "Twenty CRM API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "af3d64ad-f761-4cc1-85f9-27178ee3760b",
+              "leftValue": "={{ ($json.data?.opportunities ?? []).length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9fb4444c-29ad-495a-85b5-2e99d6e45f2b",
+      "name": "Deal exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        0
+      ],
+      "notes": "Update the open deal, or create one.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ ($env.TWENTY_URL || \"http://twenty:2020\").replace(/\\/$/, \"\") + \"/rest/opportunities/\" + $json.data.opportunities[0].id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: $('Person id').item.json.fit_score >= Number($env.HOT_LEAD_SCORE || 70) && $json.data.opportunities[0].stage === 'NEW' ? 'SCREENING' : $json.data.opportunities[0].stage }) }}"
+      },
+      "id": "f70f69e5-130d-4e20-84b9-8f1421bdfdf2",
+      "name": "Update deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        -100
+      ],
+      "notes": "Moves a NEW deal to SCREENING when the latest message is a hot lead; otherwise leaves it.",
+      "notesInFlow": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "Twenty CRM API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.TWENTY_URL || \"http://twenty:2020\").replace(/\\/$/, \"\") + \"/rest/opportunities\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: ($('Person id').item.json.source === 'whatsapp' ? 'WhatsApp' : 'Web form') + ' lead: ' + ($('Person id').item.json.contact_name || 'unknown') + ' (#' + $('Person id').item.json.id + ')', stage: $('Person id').item.json.fit_score >= Number($env.HOT_LEAD_SCORE || 70) ? 'SCREENING' : 'NEW', pointOfContactId: $('Person id').item.json.person_id }) }}"
+      },
+      "id": "54cfbc54-2773-4d91-8679-e66f1c793eeb",
+      "name": "Create deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        100
+      ],
+      "notes": "Creates a deal linked to the person (pointOfContactId), SCREENING if hot.",
+      "notesInFlow": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "Twenty CRM API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads SET crm_person_id = $2, crm_deal_id = $3, updated_at = now() WHERE id = $1::bigint RETURNING id, crm_person_id, crm_deal_id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Person id').item.json.id, $('Person id').item.json.person_id, $json.data?.updateOpportunity?.id ?? $json.data?.createOpportunity?.id ] }}",
+          "connectionTimeout": 10
+        }
+      },
+      "id": "45099be2-9f76-49e0-8a0c-758f22465330",
+      "name": "Save CRM ids",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2420,
+        0
+      ],
+      "notes": "Stores the Twenty person and deal ids on the lead.",
+      "notesInFlow": true,
+      "credentials": {
+        "postgres": {
+          "id": null,
+          "name": "Ops ledger (Postgres)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "content": "## CRM sync (Twenty)\nFree, open-source CRM that runs in this repo's compose (`--profile crm`).\nFind person → create if missing → find open deal → update or create → store ids.\nPattern from n8n template #18696, rebuilt with HTTP Request nodes (no community package).",
+        "height": 280,
+        "width": 380,
+        "color": 4
+      },
+      "id": "fb7f7127-16ae-4902-8702-a4e1ae5528d0",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -120
+      ]
+    }
+  ],
+  "connections": {
+    "Lead to sync": {
+      "main": [
+        [
+          {
+            "node": "CRM enabled?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM enabled?": {
+      "main": [
+        [
+          {
+            "node": "Load lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load lead": {
+      "main": [
+        [
+          {
+            "node": "Find person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find person": {
+      "main": [
+        [
+          {
+            "node": "Pick matching person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick matching person": {
+      "main": [
+        [
+          {
+            "node": "Person exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person exists?": {
+      "main": [
+        [
+          {
+            "node": "Person id",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create person": {
+      "main": [
+        [
+          {
+            "node": "Person id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person id": {
+      "main": [
+        [
+          {
+            "node": "Find open deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find open deal": {
+      "main": [
+        [
+          {
+            "node": "Deal exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deal exists?": {
+      "main": [
+        [
+          {
+            "node": "Update deal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update deal": {
+      "main": [
+        [
+          {
+            "node": "Save CRM ids",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create deal": {
+      "main": [
+        [
+          {
+            "node": "Save CRM ids",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "aiopsErrHandler0",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}
