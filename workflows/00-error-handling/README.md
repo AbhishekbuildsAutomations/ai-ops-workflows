@@ -1,12 +1,16 @@
 # Workflow 0: error handling and failure ledger
 
+**[Open the flow page (flow.html)](flow.html)**: diagram, every step, failure behaviour, data and config, generated from the workflow JSON.
+
 ## Problem
 
 Automations fail silently. A scheduled sync breaks at 3 AM, n8n marks the execution red, and nobody looks at the executions list until a customer complains. When someone does look, there is no history: is this the first time this node failed, or the fortieth?
 
 ## What it does
 
-Every other workflow in this repo points at one **error workflow**. When any of them fails:
+Every workflow in this repo points at one error workflow. It logs each failure to a Postgres ledger, groups repeats of the same bug into one row with a count, and sends a Telegram alert. A weekly digest summarises the week.
+
+When any workflow fails:
 
 1. The error is turned into a **signature**: workflow id, failed node, and the message with ids, numbers, URLs, emails and timestamps masked. `order 4812 after 3021ms` and `order 77 after 3950ms` are the same bug, so they share a signature.
 2. One Postgres statement writes to `failure_ledger`. A new signature inserts a row; a known one increments `recurrence_count`. If the row had been marked `fixed`, it flips back to `open`, and the alert says it is a regression.

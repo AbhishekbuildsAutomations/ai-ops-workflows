@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workflow 0: error handling and failure ledger · flow</title><style>
+:root{--bg:#fbfbfa;--fg:#1d1d1f;--muted:#5d5d63;--line:#dcdcdf;--card:#fff;--accent:#2f5fd0;--code:#f1f1f3;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#141417;--fg:#ececef;--muted:#a3a3ad;--line:#34343a;--card:#1c1c20;--accent:#8fb0ff;--code:#26262c}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow-wrap:anywhere}
+main{max-width:980px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.75rem;line-height:1.25;margin:.2em 0 .3em}h2{font-size:1.35rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}h3{font-size:1.1rem;margin:1.6em 0 .5em}h4{margin:1.2em 0 .3em}
+a{color:var(--accent)}code{background:var(--code);padding:.1em .35em;border-radius:4px;font-size:.92em}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;max-width:100%;font-size:14px;line-height:1.5}pre code{background:none;padding:0;white-space:pre}
+.meta{color:var(--muted)}.badge{display:inline-block;padding:.1em .6em;border:1px solid var(--line);border-radius:99px;font-size:.9rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center;overflow-x:auto}
+.diagram svg{max-width:none!important;height:auto} /* natural size; a wide diagram scrolls inside its box, never the page */
+table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
+td.n{color:var(--muted);width:2.2em}
+@media (max-width:700px){table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:6px 4px}td{border:0;padding:4px 10px}td::before{content:attr(data-label);display:block;color:var(--muted);font-size:.85rem;font-weight:600}td.n{width:auto}}
+ul{padding-left:1.3em}</style></head>
+<body><main>
+<p class="meta"><a href="../../docs/index.html">All workflows</a> · <a href="README.md">README</a></p>
+<h1>Workflow 0: error handling and failure ledger</h1>
+<p><span class="badge">✅ done</span></p>
+<p>Automations fail silently. A scheduled sync breaks at 3 AM, n8n marks the execution red, and nobody looks at the executions list until a customer complains. When someone does look, there is no history: is this the first time this node failed, or the fortieth?</p>
+<p>Every workflow in this repo points at one error workflow. It logs each failure to a Postgres ledger, groups repeats of the same bug into one row with a count, and sends a Telegram alert. A weekly digest summarises the week.</p>
+<h2>00 · Error handler → failure ledger</h2>
+<p class="meta"><code>workflow-error-handler.json</code></p>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  n0([&quot;On any workflow error&quot;])
+  n1[&quot;Build signature&quot;]
+  n2[(&quot;Upsert ledger row&quot;)]
+  n3[&quot;Format alert&quot;]
+  n4[&quot;Send Telegram alert&quot;]
+  n0 --&gt; n1
+  n1 --&gt; n2
+  n2 --&gt; n3
+  n3 --&gt; n4
+  classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
+  class n0 trig</pre></div>
+<h3>Steps, in execution order</h3>
+<table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
+<tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>On any workflow error</strong></td><td data-label="Type">Error Trigger: runs when a linked workflow fails</td><td data-label="What it does">Receives the failed workflow, node, error message and execution link from n8n.</td><td data-label="On failure">n/a (entry point)</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Build signature</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Masks ids, numbers, URLs, emails and timestamps in the error to build a signature that groups repeats.</td><td data-label="On failure">Stops the run (this is the error handler; n8n does not re-run it on itself)</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Upsert ledger row</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Inserts a new failure_ledger row, or bumps recurrence_count and reopens a fixed row for a known signature.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Format alert</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Writes the alert text: new, repeat or regression, or &quot;ledger write failed&quot; if the database step failed.</td><td data-label="On failure">Stops the run (this is the error handler; n8n does not re-run it on itself)</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Send Telegram alert</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the alert to the chat in TELEGRAM_CHAT_ID.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
+</tbody></table>
+<h3>Where data lives</h3>
+<div class="card"><strong>Writes</strong><ul><li>Postgres table <code>failure_ledger</code></li><li>Telegram chat <code>$env.TELEGRAM_CHAT_ID</code></li></ul><strong>Reads</strong><p class="meta">none</p></div>
+<h3>Configuration (names only)</h3>
+<div class="card"><strong>Env vars</strong><ul><li><code>TELEGRAM_CHAT_ID</code></li></ul><strong>n8n credentials</strong><ul><li>Ops ledger (Postgres) (<code>postgres</code>)</li><li>Ops alerts (Telegram bot) (<code>telegramApi</code>)</li></ul></div>
+<h2>00 · Weekly failure digest</h2>
+<p class="meta"><code>workflow-weekly-failure-digest.json</code> · timezone <code>Asia/Kolkata</code> · error workflow <code>aiopsErrHandler0</code></p>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  n0([&quot;Every Monday 9:00 IST&quot;])
+  n1([&quot;Run now (test)&quot;])
+  n2[(&quot;Query ledger&quot;)]
+  n3[&quot;Format digest&quot;]
+  n4[&quot;Send digest&quot;]
+  n5{&quot;Sheets enabled?&quot;}
+  n6[&quot;Append row to Sheet&quot;]
+  n0 --&gt; n2
+  n1 --&gt; n2
+  n2 --&gt; n3
+  n3 --&gt; n4
+  n3 --&gt; n5
+  n5 --&gt;|true| n6
+  classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
+  class n0,n1 trig</pre></div>
+<h3>Steps, in execution order</h3>
+<table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
+<tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>Every Monday 9:00 IST</strong></td><td data-label="Type">Schedule: cron 0 9 * * 1</td><td data-label="What it does">Starts the digest every Monday at 09:00 Asia/Kolkata.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Query ledger</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Counts new and active signatures and open vs fixed, and lists the top recurring and new failures from the last 7 days.</td><td data-label="On failure">Retries up to 3× (5s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Format digest</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Builds the Telegram message and the one-row summary for the sheet.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Send digest</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the digest to the chat in TELEGRAM_CHAT_ID.</td><td data-label="On failure">Retries up to 3× (5s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Sheets enabled?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Continues to Google Sheets only when DIGEST_SHEETS_ENABLED is &quot;true&quot;.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Append row to Sheet</strong></td><td data-label="Type">Google Sheets: append row</td><td data-label="What it does">Appends one row per week to the Digest tab of the sheet in DIGEST_SHEET_ID.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Run now (test)</strong></td><td data-label="Type">Manual trigger: runs when you click Execute</td><td data-label="What it does">Starts the same digest on demand, for testing.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+</tbody></table>
+<h3>Where data lives</h3>
+<div class="card"><strong>Writes</strong><ul><li>Telegram chat <code>$env.TELEGRAM_CHAT_ID</code></li><li>Google Sheet (tab <code>Digest</code>, id from <code>$env.DIGEST_SHEET_ID</code>)</li></ul><strong>Reads</strong><ul><li>Postgres table <code>failure_ledger</code></li></ul></div>
+<h3>Configuration (names only)</h3>
+<div class="card"><strong>Env vars</strong><ul><li><code>DIGEST_SHEETS_ENABLED</code></li><li><code>DIGEST_SHEET_ID</code></li><li><code>TELEGRAM_CHAT_ID</code></li></ul><strong>n8n credentials</strong><ul><li>Ops ledger (Postgres) (<code>postgres</code>)</li><li>Ops alerts (Telegram bot) (<code>telegramApi</code>)</li></ul></div>
+<h2>How to test</h2>
+<pre><code># 1. The signature logic alone, no n8n needed
+node workflows/00-error-handling/test/signature.test.mjs
+
+# 2. The whole loop: fail twice
+curl -X POST http://localhost:5678/webhook/trigger-failure
+curl -X POST http://localhost:5678/webhook/trigger-failure
+
+# 3. One row, recurrence_count = 2
+docker compose exec postgres sh -c 'psql -U &quot;$POSTGRES_USER&quot; -d &quot;$POSTGRES_DB&quot; -c &quot;select id, signature, recurrence_count, status from failure_ledger&quot;'
+
+# 4. Mark it fixed, fail again: the alert says &quot;Regression&quot; and the row is open again
+docker compose exec postgres sh -c 'psql -U &quot;$POSTGRES_USER&quot; -d &quot;$POSTGRES_DB&quot; -c &quot;update failure_ledger set status = '&quot;'fixed'&quot;', fixed_at = now() where id = 1&quot;'
+curl -X POST http://localhost:5678/webhook/trigger-failure</code></pre>
+<p>To test the digest, open <strong>00 · Weekly failure digest</strong> in n8n and click <strong>Execute workflow</strong>. It uses the <strong>Run now (test)</strong> trigger.</p>
+<p class="meta">Generated by <code>scripts/build-flow-html.mjs</code> from the workflow JSON and README. Do not edit by hand.</p>
+</main>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+mermaid.initialize({ startOnLoad: true, theme: dark ? 'dark' : 'default', securityLevel: 'strict', flowchart: { useMaxWidth: false, htmlLabels: true, wrappingWidth: 180 } });
+</script>
+</body></html>
