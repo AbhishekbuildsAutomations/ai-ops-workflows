@@ -11,7 +11,9 @@
       "position": [
         0,
         0
-      ]
+      ],
+      "notes": "Receives the failed workflow, node, error message and execution link from n8n.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -24,7 +26,9 @@
       "position": [
         220,
         0
-      ]
+      ],
+      "notes": "Masks ids, numbers, URLs, emails and timestamps in the error to build a signature that groups repeats.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -53,7 +57,9 @@
           "id": null,
           "name": "Ops ledger (Postgres)"
         }
-      }
+      },
+      "notes": "Inserts a new failure_ledger row, or bumps recurrence_count and reopens a fixed row for a known signature.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -66,7 +72,9 @@
       "position": [
         660,
         0
-      ]
+      ],
+      "notes": "Writes the alert text: new, repeat or regression, or \"ledger write failed\" if the database step failed.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -95,7 +103,9 @@
           "id": null,
           "name": "Ops alerts (Telegram bot)"
         }
-      }
+      },
+      "notes": "Sends the alert to the chat in TELEGRAM_CHAT_ID.",
+      "notesInFlow": true
     },
     {
       "parameters": {

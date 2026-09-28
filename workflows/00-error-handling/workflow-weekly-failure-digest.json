@@ -20,7 +20,9 @@
       "position": [
         0,
         0
-      ]
+      ],
+      "notes": "Starts the digest every Monday at 09:00 Asia/Kolkata.",
+      "notesInFlow": true
     },
     {
       "parameters": {},
@@ -31,7 +33,9 @@
       "position": [
         0,
         180
-      ]
+      ],
+      "notes": "Starts the same digest on demand, for testing.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -57,7 +61,9 @@
       },
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "notes": "Counts new and active signatures and open vs fixed, and lists the top recurring and new failures from the last 7 days.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -70,7 +76,9 @@
       "position": [
         440,
         0
-      ]
+      ],
+      "notes": "Builds the Telegram message and the one-row summary for the sheet.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -97,7 +105,9 @@
       },
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "notes": "Sends the digest to the chat in TELEGRAM_CHAT_ID.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -130,7 +140,9 @@
       "position": [
         680,
         100
-      ]
+      ],
+      "notes": "Continues to Google Sheets only when DIGEST_SHEETS_ENABLED is \"true\".",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -232,7 +244,9 @@
       "position": [
         900,
         100
-      ]
+      ],
+      "notes": "Appends one row per week to the Digest tab of the sheet in DIGEST_SHEET_ID.",
+      "notesInFlow": true
     },
     {
       "parameters": {
