@@ -1,0 +1,168 @@
+{
+  "id": "aiopsErrHandler0",
+  "name": "00 · Error handler → failure ledger",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "fb93697f-4493-4666-8f98-0c1f174cbd9f",
+      "name": "On any workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turns the Error Trigger payload into one ledger row.\n// This workflow is the last line of defence, so nothing here may throw.\nconst j = $input.first().json ?? {};\nconst ex = j.execution ?? {};\nconst trg = j.trigger ?? {};          // present when the failing workflow's TRIGGER broke\nconst wf = j.workflow ?? {};\nconst err = ex.error ?? trg.error ?? {};\n\nconst message = String(err.message || err.description || 'Unknown error').slice(0, 2000);\nconst failedNode = ex.lastNodeExecuted || err.node?.name || (j.trigger ? 'trigger' : 'unknown');\n\n// Mask the parts of a message that change between runs of the same bug,\n// so \"order 4812 after 3021ms\" and \"order 77 after 3950ms\" group together.\nfunction normalise(s) {\n  return s\n    .toLowerCase()\n    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')\n    .replace(/\\d{4}-\\d{2}-\\d{2}[t ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(z|[+-]\\d{2}:?\\d{2})?/g, '<ts>')\n    .replace(/https?:\\/\\/\\S+/g, '<url>')\n    .replace(/[\\w.+-]+@[\\w-]+\\.[\\w.]+/g, '<email>')\n    .replace(/\\b(?=[0-9a-f]*\\d)[0-9a-f]{8,}\\b/g, '<hex>')\n    .replace(/\\d+(\\.\\d+)?/g, '<n>')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, 300);\n}\n\nreturn [{ json: {\n  signature: [wf.id || wf.name || 'unknown', failedNode, normalise(message)].join(' | '),\n  workflow_id: wf.id ?? null,\n  workflow_name: wf.name || 'unknown workflow',\n  failed_node: failedNode,\n  error_message: message,\n  execution_id: ex.id ?? null,\n  execution_url: ex.url ?? null,\n  error_at: new Date(trg.error?.timestamp ?? Date.now()).toISOString(),\n} }];"
+      },
+      "id": "3d2d2ad0-df7b-4171-8c0c-ce24656e68f1",
+      "name": "Build signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- One statement, so two failures arriving at once cannot both insert.\n-- prev is read from the snapshot before the upsert, which tells us if a \"fixed\" bug came back.\nWITH prev AS (SELECT status FROM failure_ledger WHERE signature = $1)\nINSERT INTO failure_ledger\n  (signature, workflow_id, workflow_name, failed_node, error_message, execution_id, execution_url, first_seen_at, last_seen_at)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $8::timestamptz)\nON CONFLICT (signature) DO UPDATE SET\n  recurrence_count = failure_ledger.recurrence_count + 1,\n  last_seen_at     = EXCLUDED.last_seen_at,\n  workflow_name    = EXCLUDED.workflow_name,\n  error_message    = EXCLUDED.error_message,\n  execution_id     = EXCLUDED.execution_id,\n  execution_url    = EXCLUDED.execution_url,\n  status           = 'open',\n  fixed_at         = NULL\nRETURNING id, recurrence_count, (SELECT status FROM prev) AS previous_status;",
+        "options": {
+          "queryReplacement": "={{ [ $json.signature, $json.workflow_id, $json.workflow_name, $json.failed_node, $json.error_message, $json.execution_id, $json.execution_url, $json.error_at ] }}",
+          "connectionTimeout": 5
+        }
+      },
+      "id": "857d6b2c-489a-4285-8d72-b5637ef8b658",
+      "name": "Upsert ledger row",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": null,
+          "name": "Ops ledger (Postgres)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Works whether or not the ledger write succeeded.\nconst s = $('Build signature').first().json;\nconst r = $input.first().json ?? {};\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst ledgerOk = r.recurrence_count !== undefined && r.recurrence_count !== null;\nconst count = ledgerOk ? Number(r.recurrence_count) : null;\n// With \"continue on error\", a failed node outputs { message, error: {...} }.\nconst ledgerError = r.message || r.error?.message || (typeof r.error === 'string' ? r.error : 'no response');\n\nconst title = !ledgerOk ? '🔴 Workflow failed (ledger write failed)'\n  : r.previous_status === 'fixed' ? '🟠 Regression: a failure marked fixed is back'\n  : count > 1 ? '🔁 Repeat failure'\n  : '🔴 New failure';\n\nconst lines = [\n  `<b>${esc(title)}</b>`,\n  '',\n  `<b>Workflow:</b> ${esc(s.workflow_name)}`,\n  `<b>Node:</b> ${esc(s.failed_node)}`,\n  `<b>Error:</b> ${esc(s.error_message.slice(0, 500))}`,\n  ledgerOk ? `<b>Seen:</b> ${count} time${count === 1 ? '' : 's'} (ledger #${r.id})`\n           : `<b>Ledger:</b> ${esc(String(ledgerError).slice(0, 200))}`,\n  s.execution_url ? `\\n<a href=\"${esc(s.execution_url)}\">Open execution ${esc(s.execution_id)}</a>` : null,\n];\nreturn [{ json: { text: lines.filter((l) => l !== null).join('\\n') } }];"
+      },
+      "id": "1c4b79eb-28e4-4a67-8f91-1a8085c26d67",
+      "name": "Format alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "b51ee04d-82b1-4bfd-83e5-62bb607a9a5f",
+      "name": "Send Telegram alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "telegramApi": {
+          "id": null,
+          "name": "Ops alerts (Telegram bot)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Error handler\nSet this as the **Error workflow** in every other workflow's settings.\n\n1. Masks ids, numbers, urls and timestamps in the error → `signature`.\n2. One SQL upsert: new signature inserts, a repeat bumps `recurrence_count`. A repeat of a `fixed` row reopens it.\n3. Telegram alert.\n\nPostgres and Telegram are set to **continue on error** with 3 tries, so a dead database still alerts and a dead bot still logs.",
+        "height": 380,
+        "width": 380,
+        "color": 3
+      },
+      "id": "4357a535-b3ec-4134-8f44-266a2c57f95c",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -120
+      ]
+    }
+  ],
+  "connections": {
+    "On any workflow error": {
+      "main": [
+        [
+          {
+            "node": "Build signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build signature": {
+      "main": [
+        [
+          {
+            "node": "Upsert ledger row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert ledger row": {
+      "main": [
+        [
+          {
+            "node": "Format alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format alert": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}
