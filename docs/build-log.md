@@ -200,6 +200,15 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
 - **Run 2:** intent 93.3%, schema-valid 100% on the first try, hot precision 71.4% and recall 71.4%, median 8.5 s. Remaining misses are written up in the README (office contract, heavy typos, "next month" scored hot).
 - **Lesson:** the eval paid for itself. Without it, 9 of 15 Telegram alerts would have been false, and nobody would have known why.
 
+### 31. Getting the ngrok tunnel up (followed https://ngrok.com/agent-setup/prompt.md)
+- **ERR_NGROK_313:** the compose command always passed `--url` with a placeholder domain the account doesn't own.
+  **Fix:** `${NGROK_URL:+--url=${NGROK_URL}}` (Compose's "alternative value" syntax, <!-- doc --> https://docs.docker.com/reference/compose-file/interpolation/). With no `NGROK_URL`, ngrok uses the account's own free dev domain.
+- **ERR_NGROK_108** "limited to 3 simultaneous ngrok agent sessions" (<!-- doc --> https://ngrok.com/docs/errors/err_ngrok_108): no other ngrok was running on this Mac, so the sessions belonged to other machines on the same account. They had expired by the next attempt.
+  **Lesson:** the free plan caps agents per account, not per machine. The fix is to stop other agents, or run several tunnels from one agent config.
+- **No way to read the URL:** the `ngrok/ngrok` image has no `curl`/`wget`, and the agent's default interactive display writes no logs.
+  **Fix:** publish the agent API as `127.0.0.1:4040:4040` (localhost only, since it shows live traffic) and read `/api/tunnels`, as ngrok's Docker page recommends.
+- **Verified through the public URL:** `/healthz` returned `{"status":"ok"}` as locally, the editor loads (behind the n8n login), and the WhatsApp verify webhook echoed `hub.challenge` (200), with 403 for a wrong token. The domain stayed the same after a restart.
+
 ---
 
 ## What I should be able to explain about Workflow 1
