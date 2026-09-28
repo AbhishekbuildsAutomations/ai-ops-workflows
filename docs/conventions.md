@@ -33,6 +33,7 @@ Edit in the n8n UI, then:
 
 ```bash
 ./scripts/export-workflows.sh
+node scripts/build-flow-html.mjs
 git diff workflows/
 ```
 
@@ -45,6 +46,15 @@ The script:
 5. Writes each workflow over the file in the repo with the same `id`. A new workflow lands in `workflows/_new/`; move it into its folder.
 
 Don't use the UI's **Download** for committed files. It keeps credential IDs and instance metadata.
+
+## Definition of done (every workflow)
+
+- [ ] Every node has a one-sentence **Notes** entry (node **Settings → Notes**, "Display note in flow" on). `flow.html` uses it for the "What it does" column.
+- [ ] Error workflow set to `aiopsErrHandler0`.
+- [ ] Exported with `./scripts/export-workflows.sh`, then **`node scripts/build-flow-html.mjs`** run to regenerate `flow.html` and `docs/index.html`.
+- [ ] `node scripts/build-flow-html.test.mjs` passes. It fails if a node is missing from a diagram or table, or if a `flow.html` is stale.
+- [ ] Folder README has `## Problem`, `## What it does`, `## How to test` (flow.html copies from these) and links `flow.html`.
+- [ ] Root README row with status and Flow link.
 
 ## Tests
 

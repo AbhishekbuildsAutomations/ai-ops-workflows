@@ -84,6 +84,28 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
 
 ---
 
+## Part A: flow.html for every workflow (2026-09-28)
+
+### 15. Mermaid is on v12, not v11
+- The first draft imported `mermaid@11`. jsDelivr's latest is 12.0.0, and the Mermaid usage docs now show `mermaid@12/dist/mermaid.esm.min.mjs` (https://mermaid.js.org/config/usage.html). The script now pins the major, `@12`, so a future v13 can't change the pages silently.
+
+### 16. Docker on Colima couldn't see `/private/tmp`
+- **Symptom:** `cp: cannot stat '/out/check.mjs'` inside the Playwright container, although the file existed on the Mac.
+- **Cause:** Colima only shares your home folder with its VM. A bind mount from outside `$HOME` shows up as an empty directory, with no error.
+- **Fix:** screenshots and the check script live under `~/.cache/aiops-shots`.
+
+### 17. The automated check passed, but the page looked wrong
+- The Playwright check (scrollWidth ≤ viewport, body font ≥ 16px, every diagram rendered) passed on the first run. Looking at the screenshots showed three real bugs it couldn't catch:
+  1. **Giant diagram on a laptop.** `svg{max-width:100%!important}` overrode Mermaid's own natural-width cap, so a 5-node chain scaled up to fill 950px.
+     **Fix:** `useMaxWidth:false`, render at natural size, and put `overflow-x:auto` on the diagram box. A wide diagram now scrolls inside its box on a phone and never scrolls the page.
+  2. **Fake tables in "Where data lives"** (`SET`, `the`). The SQL regex matched `DO UPDATE SET` and the word "from" in a SQL comment.
+     **Fix:** strip `--` comments, and ignore an `update` that is followed by `set`.
+  3. **Summary cut off mid-thought.** The README's first paragraph ended in "When any of them fails:", a lead-in to a list.
+     **Fix:** rewrote that paragraph as standalone sentences.
+- **Lesson:** a pass/fail check proves the page isn't broken; only looking at it proves it's right.
+
+---
+
 ## What I should be able to explain about Workflow 0
 
 1. **Why a ledger and not just alerts:** an alert tells you something broke; a ledger tells you it's the fortieth time. The signature (workflow + node + message with ids, numbers, URLs and timestamps masked) is what makes 40 runs one row.

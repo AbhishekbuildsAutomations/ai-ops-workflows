@@ -2,11 +2,13 @@
 
 n8n workflows that solve problems companies list in AI-automation job posts. Each one runs locally from this repo with Docker, with no accounts to create except a Telegram bot for alerts.
 
-| # | Workflow | Problem it solves | Status | Demo |
-|---|----------|-------------------|--------|------|
-| 0 | [Error handling and failure ledger](workflows/00-error-handling/) | Automations fail silently; nobody knows a run broke until a customer complains. Every failure is logged to Postgres, grouped by a normalised signature, alerted on Telegram, and summarised weekly. | ✅ done | [results](workflows/00-error-handling/README.md#results) |
+| # | Workflow | Problem it solves | Status | Flow | Demo |
+|---|----------|-------------------|--------|------|------|
+| 0 | [Error handling and failure ledger](workflows/00-error-handling/) | Automations fail silently; nobody knows a run broke until a customer complains. Every failure is logged to Postgres, grouped by a normalised signature, alerted on Telegram, and summarised weekly. | ✅ done | [flow.html](workflows/00-error-handling/flow.html) | [results](workflows/00-error-handling/README.md#results) |
 
 Every workflow in this repo uses Workflow 0 as its error workflow.
+
+Each workflow folder has a `flow.html`: open it in a browser to see the diagram, every step, what happens on failure, where data goes and how to test it, without opening n8n. [`docs/index.html`](docs/index.html) links them all. GitHub shows `.html` files as source; to view one, clone the repo and open the file, or use a raw-HTML preview.
 
 ## Quick start
 
@@ -58,7 +60,9 @@ scripts/bootstrap.sh      clone -> running demo in one command
 scripts/export-workflows.sh   n8n -> repo, credentials stripped, refuses personal data
 docs/conventions.md       naming, error handling, exporting
 docs/build-log.md         what broke while building this, and the fix
-workflows/NN-name/        one folder per workflow: JSON, SQL, tests, README, screenshots
+docs/index.html           links every workflow's flow.html
+scripts/build-flow-html.mjs   regenerates every flow.html + docs/index.html (no dependencies)
+workflows/NN-name/        one folder per workflow: JSON, SQL, tests, README, flow.html, screenshots
 ```
 
 ## Stop / reset
