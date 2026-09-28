@@ -57,7 +57,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, source, contact, contact_name, first_message, status, intent, fit_score, urgency, reason FROM leads WHERE id = $1::bigint AND status <> 'spam';",
+        "query": "SELECT id, source, contact, contact_name, first_message, status, intent, fit_score, urgency, reason FROM leads WHERE id = $1::bigint;",
         "options": {
           "queryReplacement": "={{ [ $json.lead_id ] }}",
           "connectionTimeout": 10
@@ -71,7 +71,7 @@
         440,
         0
       ],
-      "notes": "Reads the saved lead; spam is never sent to the CRM.",
+      "notes": "Reads the saved lead.",
       "notesInFlow": true,
       "credentials": {
         "postgres": {
@@ -82,6 +82,43 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a5b5d7b0-4c5e-4ec7-8778-54d5fa782a02",
+              "leftValue": "={{ !!$json.id && $json.status !== 'spam' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "5c7c1915-1317-4530-8be8-bb31bf0eb574",
+      "name": "Worth syncing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        550,
+        160
+      ],
+      "notes": "Spam never goes to the CRM.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -444,6 +481,17 @@
       ]
     },
     "Load lead": {
+      "main": [
+        [
+          {
+            "node": "Worth syncing?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Worth syncing?": {
       "main": [
         [
           {

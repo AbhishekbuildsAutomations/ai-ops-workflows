@@ -68,8 +68,7 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// WhatsApp only allows free-form messages within 24h of the customer's last message\n// (the customer service window); after that only a pre-approved template may be sent.\nconst l = $json;\nconst action = l.source === 'whatsapp' ? (l.in_window ? 'send' : 'template_needed') : 'manual';\nreturn { json: { ...l, action, wa_to: l.contact.replace(/^\\+/, '') } };"
+        "jsCode": "// WhatsApp only allows free-form messages within 24h of the customer's last message\n// (the customer service window); after that only a pre-approved template may be sent.\n// A query with no rows still gives one empty item, so rows without lead_id are dropped (= nothing to do).\nreturn $input.all().filter((i) => i.json.lead_id).map(({ json: l }) => ({ json: {\n  ...l,\n  action: l.source === 'whatsapp' ? (l.in_window ? 'send' : 'template_needed') : 'manual',\n  wa_to: l.contact.replace(/^\\+/, ''),\n} }));"
       },
       "id": "a2514cfc-e63e-4606-8295-5b17288b8353",
       "name": "Decide channel",
