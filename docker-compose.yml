@@ -1,0 +1,74 @@
+# n8n + Postgres for the ai-ops-workflows portfolio.
+# Based on n8n's official withPostgres example:
+# https://github.com/n8n-io/n8n-hosting/tree/main/docker-compose/withPostgres
+#
+# Secrets reach the containers as files under /run/secrets (n8n and Postgres both read
+# <VAR>_FILE), not as environment variables. That matters here because the workflows read
+# $env.TELEGRAM_CHAT_ID, which means env access in expressions is switched on: anything in
+# n8n's environment is readable from a workflow. So only non-secret values live there.
+
+secrets:
+  postgres_password:
+    environment: POSTGRES_PASSWORD
+  n8n_encryption_key:
+    environment: N8N_ENCRYPTION_KEY
+
+volumes:
+  db_storage:
+  n8n_storage:
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_DB
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      # postgres:18 moved its default data dir; pin it so the volume mount stays valid.
+      - PGDATA=/var/lib/postgresql/data
+    secrets: [postgres_password]
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+      # Runs once, when the volume is first created.
+      - ./workflows/00-error-handling/sql/schema.sql:/docker-entrypoint-initdb.d/00-error-handling.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION}
+    restart: unless-stopped
+    ports:
+      - ${N8N_PORT:-5678}:5678
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD_FILE=/run/secrets/postgres_password
+      - N8N_ENCRYPTION_KEY_FILE=/run/secrets/n8n_encryption_key
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Kolkata}
+      - TZ=${GENERIC_TIMEZONE:-Asia/Kolkata}
+      # Links in alerts point here.
+      - N8N_EDITOR_BASE_URL=http://localhost:${N8N_PORT:-5678}
+      - WEBHOOK_URL=http://localhost:${N8N_PORT:-5678}
+      - N8N_SECURE_COOKIE=false # plain http on localhost
+      - N8N_DIAGNOSTICS_ENABLED=false
+      # Defaults to blocked since n8n 2.0; workflows need $env.TELEGRAM_CHAT_ID etc.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # Values the workflows read. Not secrets.
+      - TELEGRAM_CHAT_ID
+      - DIGEST_SHEETS_ENABLED=${DIGEST_SHEETS_ENABLED:-false}
+      - DIGEST_SHEET_ID
+    secrets: [postgres_password, n8n_encryption_key]
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      # Lets scripts/bootstrap.sh import the workflow JSON from inside the container.
+      - ./workflows:/repo/workflows:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
