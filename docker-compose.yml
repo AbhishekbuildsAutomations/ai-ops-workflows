@@ -18,6 +18,9 @@ secrets:
 volumes:
   db_storage:
   n8n_storage:
+  twenty_data:
+  twenty_clickhouse:
+  twenty_storage:
 
 services:
   postgres:
@@ -57,7 +60,9 @@ services:
       - TZ=${GENERIC_TIMEZONE:-Asia/Kolkata}
       # Links in alerts point here.
       - N8N_EDITOR_BASE_URL=http://localhost:${N8N_PORT:-5678}
-      - N8N_WEBHOOK_URL=http://localhost:${N8N_PORT:-5678}
+      # Public base URL for webhooks. Set it to your tunnel URL for WhatsApp (see README).
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:${N8N_PORT:-5678}}
+      - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-0}
       - N8N_SECURE_COOKIE=false # plain http on localhost
       - N8N_DIAGNOSTICS_ENABLED=false
       # Code nodes run in the separate n8n-runner container (internal mode is deprecated).
@@ -70,6 +75,18 @@ services:
       - TELEGRAM_CHAT_ID
       - DIGEST_SHEETS_ENABLED=${DIGEST_SHEETS_ENABLED:-false}
       - DIGEST_SHEET_ID
+      # Workflow 1: lead agent
+      - LLM_MODEL=${LLM_MODEL:-gemini-3.5-flash-lite}
+      - HOT_LEAD_SCORE=${HOT_LEAD_SCORE:-70}
+      - FOLLOWUP_HOURS=${FOLLOWUP_HOURS:-4}
+      - DEDUPE_MINUTES=${DEDUPE_MINUTES:-30}
+      - CRM_ENABLED=${CRM_ENABLED:-false}
+      - TWENTY_URL=${TWENTY_URL:-http://twenty:2020}
+      - WHATSAPP_PHONE_NUMBER_ID
+      - WHATSAPP_VERIFY_TOKEN
+      # The Code node that checks Meta's signature needs this. It is readable by any workflow
+      # (env access is on); see Workflow 1 README, known limits.
+      - WHATSAPP_APP_SECRET
     secrets: [postgres_password, n8n_encryption_key, runners_auth_token]
     volumes:
       - n8n_storage:/home/node/.n8n
@@ -85,5 +102,35 @@ services:
     environment:
       - N8N_RUNNERS_AUTH_TOKEN=${RUNNERS_AUTH_TOKEN}
       - N8N_RUNNERS_TASK_BROKER_URI=http://n8n:5679
+    depends_on:
+      - n8n
+
+  # --- Optional: Twenty CRM (free, open-source) for Workflow 1. `docker compose --profile crm up -d`
+  # The all-in-one dev image seeds a demo workspace and a fixed API key that only works against
+  # this local image (twentyhq/twenty: packages/twenty-sdk/src/cli/constants/dev-api-key.ts).
+  # Demo use only: it runs NODE_ENV=development. Login: tim@apple.dev / tim@apple.dev
+  twenty:
+    image: twentycrm/twenty-app-dev:${TWENTY_VERSION:-v2.43.0}
+    profiles: [crm]
+    restart: unless-stopped
+    ports:
+      - ${TWENTY_PORT:-2020}:2020
+    environment:
+      - NODE_PORT=2020
+      - SERVER_URL=http://localhost:${TWENTY_PORT:-2020}
+    volumes:
+      - twenty_data:/data/postgres
+      - twenty_clickhouse:/data/clickhouse
+      - twenty_storage:/app/packages/twenty-server/.local-storage
+
+  # --- Optional: public HTTPS URL for the WhatsApp webhook. `COMPOSE_PROFILES=tunnel`
+  # ngrok's free plan includes one permanent dev domain (https://ngrok.com/docs/pricing-limits/free-plan-limits/).
+  ngrok:
+    image: ngrok/ngrok:3
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: http n8n:5678 --url ${NGROK_URL:-https://set-NGROK_URL-in-.env.ngrok-free.app}
+    environment:
+      - NGROK_AUTHTOKEN
     depends_on:
       - n8n
