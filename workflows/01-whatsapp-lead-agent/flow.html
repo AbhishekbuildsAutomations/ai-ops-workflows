@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workflow 1: WhatsApp and web-form lead qualification agent · flow</title><style>
+:root{--bg:#fbfbfa;--fg:#1d1d1f;--muted:#5d5d63;--line:#dcdcdf;--card:#fff;--accent:#2f5fd0;--code:#f1f1f3;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#141417;--fg:#ececef;--muted:#a3a3ad;--line:#34343a;--card:#1c1c20;--accent:#8fb0ff;--code:#26262c}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow-wrap:anywhere}
+main{max-width:980px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.75rem;line-height:1.25;margin:.2em 0 .3em}h2{font-size:1.35rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}h3{font-size:1.1rem;margin:1.6em 0 .5em}h4{margin:1.2em 0 .3em}
+a{color:var(--accent)}code{background:var(--code);padding:.1em .35em;border-radius:4px;font-size:.92em}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;max-width:100%;font-size:14px;line-height:1.5}pre code{background:none;padding:0;white-space:pre}
+.meta{color:var(--muted)}.badge{display:inline-block;padding:.1em .6em;border:1px solid var(--line);border-radius:99px;font-size:.9rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center;overflow-x:auto}
+.diagram svg{max-width:none!important;height:auto} /* natural size; a wide diagram scrolls inside its box, never the page */
+table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
+td.n{color:var(--muted);width:3em;white-space:nowrap}
+@media (max-width:700px){table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:6px 4px}td{border:0;padding:4px 10px}td::before{content:attr(data-label);display:block;color:var(--muted);font-size:.85rem;font-weight:600}td.n{width:auto}}
+ul{padding-left:1.3em}</style></head>
+<body><main>
+<p class="meta"><a href="../../docs/index.html">All workflows</a> · <a href="README.md">README</a></p>
+<h1>Workflow 1: WhatsApp and web-form lead qualification agent</h1>
+<p><span class="badge">🟡 in progress</span></p>
+<p>Small businesses get leads on WhatsApp and web forms, reply hours late or never, and can't tell a serious buyer from a time-waster. Nothing reaches the CRM, so a lead that goes quiet is simply forgotten.</p>
+<p>Every inbound message, from WhatsApp or a web form, is stored, qualified by an LLM against a strict JSON schema, and answered within seconds with one qualifying question. It is then saved to Postgres and a free CRM, and hot leads alert the owner on Telegram. A scheduled workflow sends one follow-up to leads that go quiet, and respects WhatsApp's 24-hour rule.</p>
+<h2>01 · Lead core: qualify, reply, store</h2>
+<p class="meta"><code>workflow-lead-core.json</code> · error workflow <code>aiopsErrHandler0</code></p>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  n0([&quot;Lead in&quot;])
+  n1[&quot;Normalise lead&quot;]
+  n2[(&quot;Save message, find conversation&quot;)]
+  n3{&quot;New lead?&quot;}
+  n4[&quot;Result (existing conversation)&quot;]
+  n5[&quot;Build prompt&quot;]
+  n6[&quot;Qualify (LLM)&quot;]
+  n7[&quot;Chat model&quot;]
+  n8[&quot;Validate answer&quot;]
+  n9{&quot;Valid?&quot;}
+  n10[&quot;Build retry prompt&quot;]
+  n11[&quot;Qualify again (LLM)&quot;]
+  n12[&quot;Chat model (retry)&quot;]
+  n13[&quot;Validate retry&quot;]
+  n14[&quot;LLM call failed&quot;]
+  n15[&quot;Log LLM failure to ledger&quot;]
+  n16[&quot;Decide reply&quot;]
+  n17[(&quot;Save outcome&quot;)]
+  n18[&quot;Sync to CRM&quot;]
+  n19{&quot;Reply on WhatsApp?&quot;}
+  n20[&quot;Send WhatsApp reply&quot;]
+  n21[(&quot;Record delivery&quot;)]
+  n22{&quot;Notify owner?&quot;}
+  n23[&quot;Alert owner on Telegram&quot;]
+  n24[&quot;Result&quot;]
+  n0 --&gt; n1
+  n1 --&gt; n2
+  n2 --&gt; n3
+  n3 --&gt;|true| n5
+  n3 --&gt;|false| n4
+  n5 --&gt; n6
+  n6 --&gt; n8
+  n6 --&gt;|error| n14
+  n8 --&gt; n9
+  n9 --&gt;|true| n16
+  n9 --&gt;|false| n10
+  n10 --&gt; n11
+  n11 --&gt; n13
+  n11 --&gt;|error| n14
+  n13 --&gt; n16
+  n14 --&gt; n15
+  n14 --&gt; n16
+  n16 --&gt; n17
+  n17 --&gt; n18
+  n17 --&gt; n19
+  n19 --&gt;|true| n20
+  n19 --&gt;|false| n22
+  n20 --&gt; n21
+  n21 --&gt; n22
+  n22 --&gt;|true| n23
+  n22 --&gt;|false| n24
+  n23 --&gt; n24
+  classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
+  class n0 trig</pre></div>
+<h3>Steps, in execution order</h3>
+<table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
+<tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>Lead in</strong></td><td data-label="Type">Sub-workflow trigger: runs when called</td><td data-label="What it does">Receives one lead from the form or WhatsApp workflow.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Normalise lead</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Unwraps the input into one lead shape and rejects calls without contact or message.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Save message, find conversation</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Calls lead_ingest(): per-contact lock, then duplicate (Meta retry), attached (same contact within DEDUPE_MINUTES) or new lead.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>New lead?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Only brand-new leads are qualified; follow-on messages just join their conversation.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Build prompt</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Builds the qualification prompt from business-facts.json and the lead message.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Result (existing conversation)</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Returns &quot;attached&quot; or &quot;duplicate&quot; with no reply, so a burst of messages gets one answer.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Chat model</strong></td><td data-label="Type">Lm Chat Open Ai</td><td data-label="What it does">OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">8</td><td data-label="Node"><strong>Qualify (LLM)</strong></td><td data-label="Type">Chain Llm</td><td data-label="What it does">Asks the model for intent, budget, urgency, fit score, missing info, a reply draft and a reason.</td><td data-label="On failure">Retries up to 3× (5s apart), then continues on the error output</td></tr>
+<tr><td class="n" data-label="#">9</td><td data-label="Node"><strong>Validate answer</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Parses the JSON and checks every field against the schema; never throws.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">10</td><td data-label="Node"><strong>Valid?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Valid answers go straight on; invalid ones get one retry.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">11</td><td data-label="Node"><strong>Build retry prompt</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Adds the validation errors and the rejected answer to the prompt.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">12</td><td data-label="Node"><strong>Chat model (retry)</strong></td><td data-label="Type">Lm Chat Open Ai</td><td data-label="What it does">OpenAI-compatible chat model: provider = the credential's Base URL, model = LLM_MODEL.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">13</td><td data-label="Node"><strong>Qualify again (LLM)</strong></td><td data-label="Type">Chain Llm</td><td data-label="What it does">Second and last model call, with the errors from the first.</td><td data-label="On failure">Retries up to 3× (5s apart), then continues on the error output</td></tr>
+<tr><td class="n" data-label="#">14</td><td data-label="Node"><strong>LLM call failed</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Model unreachable after retries: shapes the error for Workflow 0 and marks the answer invalid.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">15</td><td data-label="Node"><strong>Log LLM failure to ledger</strong></td><td data-label="Type">Execute Workflow: call a sub-workflow</td><td data-label="What it does">Sends the failure to Workflow 0 (failure_ledger + Telegram) without stopping this run.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">16</td><td data-label="Node"><strong>Validate retry</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Same checks; if this fails too the lead becomes needs_human.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">17</td><td data-label="Node"><strong>Decide reply</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Chooses replied / no_reply / spam / needs_human and runs the reply guard against business-facts.json.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">18</td><td data-label="Node"><strong>Save outcome</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Writes the qualification and status to leads, and the reply (if any) to lead_messages.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">19</td><td data-label="Node"><strong>Sync to CRM</strong></td><td data-label="Type">Execute Workflow: call a sub-workflow</td><td data-label="What it does">Starts the CRM sync in the background; it checks CRM_ENABLED itself.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">20</td><td data-label="Node"><strong>Reply on WhatsApp?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Form replies go back in the HTTP response; WhatsApp replies are sent here.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">21</td><td data-label="Node"><strong>Send WhatsApp reply</strong></td><td data-label="Type">HTTP Request: POST</td><td data-label="What it does">Sends the reply through the WhatsApp Cloud API (Graph v26.0).</td><td data-label="On failure">Retries up to 3× (3s apart), then continues; the error is passed on as data</td></tr>
+<tr><td class="n" data-label="#">22</td><td data-label="Node"><strong>Record delivery</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Marks the WhatsApp message delivered, or flips the lead to needs_human if Meta refused it.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">23</td><td data-label="Node"><strong>Notify owner?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Hot leads (score &gt;= HOT_LEAD_SCORE), needs_human leads and failed WhatsApp sends alert the owner.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">24</td><td data-label="Node"><strong>Alert owner on Telegram</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the owner name, source, score, reason and the reply that went out.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
+<tr><td class="n" data-label="#">25</td><td data-label="Node"><strong>Result</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Returns lead id, status and the reply to the caller.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+</tbody></table>
+<h3>Where data lives</h3>
+<div class="card"><strong>Writes</strong><ul><li>Postgres table <code>leads</code></li><li>Postgres table <code>lead_messages</code></li><li>WhatsApp message (Graph API)</li><li>Telegram chat <code>$env.TELEGRAM_CHAT_ID</code></li></ul><strong>Reads</strong><ul><li>Postgres table <code>lead_ingest</code></li><li>Postgres table <code>upd</code></li><li>Postgres table <code>msg</code></li><li>Postgres table <code>m</code></li></ul></div>
+<h3>Configuration (names only)</h3>
+<div class="card"><strong>Env vars</strong><ul><li><code>DEDUPE_MINUTES</code></li><li><code>HOT_LEAD_SCORE</code></li><li><code>LLM_MODEL</code></li><li><code>N8N_EDITOR_BASE_URL</code></li><li><code>TELEGRAM_CHAT_ID</code></li><li><code>WHATSAPP_PHONE_NUMBER_ID</code></li></ul><strong>n8n credentials</strong><ul><li>Ops ledger (Postgres) (<code>postgres</code>)</li><li>LLM (OpenAI-compatible) (<code>openAiApi</code>)</li><li>WhatsApp Cloud API token (<code>httpHeaderAuth</code>)</li><li>Ops alerts (Telegram bot) (<code>telegramApi</code>)</li></ul></div>
+<h2>01 · Lead CRM sync (Twenty)</h2>
+<p class="meta"><code>workflow-lead-crm-sync.json</code> · error workflow <code>aiopsErrHandler0</code></p>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  n0([&quot;Lead to sync&quot;])
+  n1{&quot;CRM enabled?&quot;}
+  n2[(&quot;Load lead&quot;)]
+  n3{&quot;Worth syncing?&quot;}
+  n4[&quot;Find person&quot;]
+  n5[&quot;Pick matching person&quot;]
+  n6{&quot;Person exists?&quot;}
+  n7[&quot;Create person&quot;]
+  n8[&quot;Person id&quot;]
+  n9[&quot;Find open deal&quot;]
+  n10{&quot;Deal exists?&quot;}
+  n11[&quot;Update deal&quot;]
+  n12[&quot;Create deal&quot;]
+  n13[(&quot;Save CRM ids&quot;)]
+  n0 --&gt; n1
+  n1 --&gt;|true| n2
+  n2 --&gt; n3
+  n3 --&gt;|true| n4
+  n4 --&gt; n5
+  n5 --&gt; n6
+  n6 --&gt;|true| n8
+  n6 --&gt;|false| n7
+  n7 --&gt; n8
+  n8 --&gt; n9
+  n9 --&gt; n10
+  n10 --&gt;|true| n11
+  n10 --&gt;|false| n12
+  n11 --&gt; n13
+  n12 --&gt; n13
+  classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
+  class n0 trig</pre></div>
+<h3>Steps, in execution order</h3>
+<table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
+<tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>Lead to sync</strong></td><td data-label="Type">Sub-workflow trigger: runs when called</td><td data-label="What it does">Receives { lead_id } from the lead core, in the background.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>CRM enabled?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">CRM_ENABLED=false skips the CRM entirely; Postgres already has the lead.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Load lead</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Reads the saved lead.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Worth syncing?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Spam never goes to the CRM.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Find person</strong></td><td data-label="Type">HTTP Request: GET</td><td data-label="What it does">Twenty stores phones as calling code + national number, so this searches every possible national-number suffix.</td><td data-label="On failure">Retries up to 3× (3s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Pick matching person</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Chooses the person whose full number or email matches exactly.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Person exists?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Existing people are reused; new contacts are created.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">8</td><td data-label="Node"><strong>Create person</strong></td><td data-label="Type">HTTP Request: POST</td><td data-label="What it does">Creates the person with name and email or phone.</td><td data-label="On failure">Retries up to 3× (3s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">9</td><td data-label="Node"><strong>Person id</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Carries the found or newly created person id forward.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">10</td><td data-label="Node"><strong>Find open deal</strong></td><td data-label="Type">HTTP Request: GET</td><td data-label="What it does">Looks for an opportunity for this person that is not already won.</td><td data-label="On failure">Retries up to 3× (3s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">11</td><td data-label="Node"><strong>Deal exists?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Update the open deal, or create one.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">12</td><td data-label="Node"><strong>Update deal</strong></td><td data-label="Type">HTTP Request: PATCH</td><td data-label="What it does">Moves a NEW deal to SCREENING when the latest message is a hot lead; otherwise leaves it.</td><td data-label="On failure">Retries up to 3× (3s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">13</td><td data-label="Node"><strong>Create deal</strong></td><td data-label="Type">HTTP Request: POST</td><td data-label="What it does">Creates a deal linked to the person (pointOfContactId), SCREENING if hot.</td><td data-label="On failure">Retries up to 3× (3s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">14</td><td data-label="Node"><strong>Save CRM ids</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Stores the Twenty person and deal ids on the lead.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+</tbody></table>
+<h3>Where data lives</h3>
+<div class="card"><strong>Writes</strong><ul><li>Twenty CRM people</li><li>Twenty CRM opportunities</li><li>Postgres table <code>leads</code></li></ul><strong>Reads</strong><p class="meta">none</p></div>
+<h3>Configuration (names only)</h3>
+<div class="card"><strong>Env vars</strong><ul><li><code>CRM_ENABLED</code></li><li><code>HOT_LEAD_SCORE</code></li><li><code>TWENTY_URL</code></li></ul><strong>n8n credentials</strong><ul><li>Ops ledger (Postgres) (<code>postgres</code>)</li><li>Twenty CRM API key (<code>httpHeaderAuth</code>)</li></ul></div>
+<h2>01 · Lead follow-up</h2>
+<p class="meta"><code>workflow-lead-followup.json</code> · timezone <code>Asia/Kolkata</code> · error workflow <code>aiopsErrHandler0</code></p>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  n0([&quot;Every 30 minutes&quot;])
+  n1([&quot;Run now (test)&quot;])
+  n2[(&quot;Claim due follow-ups&quot;)]
+  n3[&quot;Decide channel&quot;]
+  n4{&quot;Send now?&quot;}
+  n5[&quot;Send follow-up&quot;]
+  n6[(&quot;Record follow-up&quot;)]
+  n7{&quot;Owner action needed?&quot;}
+  n8[&quot;Tell owner&quot;]
+  n0 --&gt; n2
+  n1 --&gt; n2
+  n2 --&gt; n3
+  n3 --&gt; n4
+  n4 --&gt;|true| n5
+  n4 --&gt;|false| n6
+  n5 --&gt; n6
+  n6 --&gt; n7
+  n7 --&gt;|true| n8
+  classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
+  class n0,n1 trig</pre></div>
+<h3>Steps, in execution order</h3>
+<table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
+<tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>Every 30 minutes</strong></td><td data-label="Type">Schedule: every minutes</td><td data-label="What it does">Looks for leads that went quiet after our reply.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Run now (test)</strong></td><td data-label="Type">Manual trigger: runs when you click Execute</td><td data-label="What it does">Same run on demand, for testing.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Claim due follow-ups</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Claims leads we replied to FOLLOWUP_HOURS ago with no answer since; marks them first so none is followed up twice.</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Decide channel</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">WhatsApp inside the 24-hour window: send. Outside: log &quot;template needed&quot;. Form leads: tell the owner.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Send now?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Only in-window WhatsApp leads get an automatic follow-up.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Send follow-up</strong></td><td data-label="Type">HTTP Request: POST</td><td data-label="What it does">Sends the one follow-up text from business-facts.json.</td><td data-label="On failure">Retries up to 3× (3s apart), then continues; the error is passed on as data</td></tr>
+<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Record follow-up</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Sets followed_up / template_needed / followup_manual (or needs_human if the send failed).</td><td data-label="On failure">Retries up to 3× (2s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">8</td><td data-label="Node"><strong>Owner action needed?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Anything that was not sent automatically goes to the owner.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">9</td><td data-label="Node"><strong>Tell owner</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">One Telegram line per lead that needs a manual follow-up.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
+</tbody></table>
+<h3>Where data lives</h3>
+<div class="card"><strong>Writes</strong><ul><li>Postgres table <code>leads</code></li><li>Postgres table <code>SKIP</code></li><li>WhatsApp message (Graph API)</li><li>Postgres table <code>lead_messages</code></li><li>Telegram chat <code>$env.TELEGRAM_CHAT_ID</code></li></ul><strong>Reads</strong><ul><li>Postgres table <code>business_facts</code></li><li>Postgres table <code>d</code></li><li>Postgres table <code>upd</code></li></ul></div>
+<h3>Configuration (names only)</h3>
+<div class="card"><strong>Env vars</strong><ul><li><code>FOLLOWUP_HOURS</code></li><li><code>TELEGRAM_CHAT_ID</code></li><li><code>WHATSAPP_PHONE_NUMBER_ID</code></li></ul><strong>n8n credentials</strong><ul><li>Ops ledger (Postgres) (<code>postgres</code>)</li><li>WhatsApp Cloud API token (<code>httpHeaderAuth</code>)</li><li>Ops alerts (Telegram bot) (<code>telegramApi</code>)</li></ul></div>
+<h2>01 · Lead intake: web form</h2>
+<p class="meta"><code>workflow-lead-intake-form.json</code> · error workflow <code>aiopsErrHandler0</code></p>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  n0([&quot;POST /webhook/lead-form&quot;])
+  n1[&quot;Validate form&quot;]
+  n2{&quot;Valid?&quot;}
+  n3[&quot;Qualify lead (core)&quot;]
+  n4[&quot;Reply to form&quot;]
+  n5[&quot;Reject form&quot;]
+  n0 --&gt; n1
+  n1 --&gt; n2
+  n2 --&gt;|true| n3
+  n2 --&gt;|false| n5
+  n3 --&gt; n4
+  classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
+  class n0 trig</pre></div>
+<h3>Steps, in execution order</h3>
+<table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
+<tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>POST /webhook/lead-form</strong></td><td data-label="Type">Webhook: POST /webhook/lead-form</td><td data-label="What it does">Web-form entry point: JSON { name, phone or email, message }.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Validate form</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Requires a message and a phone (8-15 digits) or email; normalises the contact.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Valid?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Invalid bodies get a 400 with the reasons.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Qualify lead (core)</strong></td><td data-label="Type">Execute Workflow: call a sub-workflow</td><td data-label="What it does">Runs the shared lead core and waits for its result.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Reject form</strong></td><td data-label="Type">Respond to Webhook: send the HTTP reply</td><td data-label="What it does">Answers 400 with the validation errors.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Reply to form</strong></td><td data-label="Type">Respond to Webhook: send the HTTP reply</td><td data-label="What it does">Returns lead id, status and the reply text to the form.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+</tbody></table>
+<h3>Where data lives</h3>
+<div class="card"><strong>Writes</strong><p class="meta">none</p><strong>Reads</strong><p class="meta">none</p></div>
+<h3>Configuration (names only)</h3>
+<div class="card"><strong>Env vars</strong><p class="meta">none</p><strong>n8n credentials</strong><p class="meta">none</p></div>
+<h2>01 · Lead intake: WhatsApp</h2>
+<p class="meta"><code>workflow-lead-intake-whatsapp.json</code> · error workflow <code>aiopsErrHandler0</code></p>
+<div class="diagram"><pre class="mermaid">flowchart TD
+  n0([&quot;GET /webhook/whatsapp (Meta verify)&quot;])
+  n1{&quot;Verify token matches?&quot;}
+  n2[&quot;Return hub.challenge&quot;]
+  n3[&quot;Refuse verification&quot;]
+  n4([&quot;POST /webhook/whatsapp (messages)&quot;])
+  n5[&quot;Check Meta signature&quot;]
+  n6[&quot;Extract messages&quot;]
+  n7[&quot;Qualify lead (core)&quot;]
+  n0 --&gt; n1
+  n1 --&gt;|true| n2
+  n1 --&gt;|false| n3
+  n4 --&gt; n5
+  n5 --&gt; n6
+  n6 --&gt; n7
+  classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
+  class n0,n4 trig</pre></div>
+<h3>Steps, in execution order</h3>
+<table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
+<tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>GET /webhook/whatsapp (Meta verify)</strong></td><td data-label="Type">Webhook: GET /webhook/whatsapp</td><td data-label="What it does">Meta calls this once when you save the webhook URL in the app dashboard.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>POST /webhook/whatsapp (messages)</strong></td><td data-label="Type">Webhook: POST /webhook/whatsapp</td><td data-label="What it does">Meta posts messages and status updates here; answered 200 at once so Meta does not retry.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Verify token matches?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">hub.mode must be &quot;subscribe&quot; and hub.verify_token must equal WHATSAPP_VERIFY_TOKEN.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Check Meta signature</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Rejects anything not signed with your Meta app secret.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Return hub.challenge</strong></td><td data-label="Type">Respond to Webhook: send the HTTP reply</td><td data-label="What it does">Echoes hub.challenge as plain text (not JSON), which is what Meta checks.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Refuse verification</strong></td><td data-label="Type">Respond to Webhook: send the HTTP reply</td><td data-label="What it does">Wrong or missing verify token.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Extract messages</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Turns the Meta payload into one lead item per text/button message; ignores status updates.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">8</td><td data-label="Node"><strong>Qualify lead (core)</strong></td><td data-label="Type">Execute Workflow: call a sub-workflow</td><td data-label="What it does">Runs the shared lead core for each message; the core sends the WhatsApp reply.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+</tbody></table>
+<h3>Where data lives</h3>
+<div class="card"><strong>Writes</strong><p class="meta">none</p><strong>Reads</strong><p class="meta">none</p></div>
+<h3>Configuration (names only)</h3>
+<div class="card"><strong>Env vars</strong><ul><li><code>WHATSAPP_APP_SECRET</code></li><li><code>WHATSAPP_VERIFY_TOKEN</code></li></ul><strong>n8n credentials</strong><p class="meta">none</p></div>
+<h2>How to test</h2>
+<pre><code># 1. Code-node logic, straight from the workflow JSON (no n8n needed)
+node workflows/01-whatsapp-lead-agent/test/code-nodes.test.mjs
+
+# 2. Dedupe + concurrency in SQL (5 simultaneous messages -&gt; 1 lead)
+./workflows/01-whatsapp-lead-agent/test/lead-ingest.test.sh
+
+# 3. Web form: creates a lead and returns the reply
+curl -s -X POST http://localhost:5678/webhook/lead-form -H 'Content-Type: application/json' \
+  -d '{&quot;name&quot;:&quot;Test Buyer&quot;,&quot;phone&quot;:&quot;+10000000001&quot;,&quot;message&quot;:&quot;Need a 2BHK deep clean in Koramangala this Saturday&quot;}'
+
+# 4. WhatsApp without a Meta account: verification GET + a message signed with WHATSAPP_APP_SECRET
+node workflows/01-whatsapp-lead-agent/test/fake-whatsapp.mjs &quot;Hi, need a 3BHK deep clean next week&quot;
+
+# 5. Forced LLM error: point LLM_MODEL at a model that doesn't exist, restart, send a lead
+#    -&gt; lead is needs_human, the form still answers, and failure_ledger gets a row
+LLM_MODEL=no-such-model docker compose up -d n8n
+
+# 6. The eval (30 labelled messages, about 5 minutes on the free tier)
+node workflows/01-whatsapp-lead-agent/eval/run-eval.mjs</code></pre>
+<p>The follow-up workflow can be run on demand: open <strong>01 · Lead follow-up</strong> in n8n and click <strong>Execute workflow</strong>.</p>
+<p class="meta">Generated by <code>scripts/build-flow-html.mjs</code> from the workflow JSON and README. Do not edit by hand.</p>
+</main>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+mermaid.initialize({ startOnLoad: true, theme: dark ? 'dark' : 'default', securityLevel: 'strict', flowchart: { useMaxWidth: false, htmlLabels: true, wrappingWidth: 180 } });
+</script>
+</body></html>

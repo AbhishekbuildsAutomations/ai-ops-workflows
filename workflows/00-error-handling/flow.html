@@ -14,7 +14,7 @@ pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;m
 .diagram{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center;overflow-x:auto}
 .diagram svg{max-width:none!important;height:auto} /* natural size; a wide diagram scrolls inside its box, never the page */
 table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
-td.n{color:var(--muted);width:2.2em}
+td.n{color:var(--muted);width:3em;white-space:nowrap}
 @media (max-width:700px){table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:6px 4px}td{border:0;padding:4px 10px}td::before{content:attr(data-label);display:block;color:var(--muted);font-size:.85rem;font-weight:600}td.n{width:auto}}
 ul{padding-left:1.3em}</style></head>
 <body><main>
@@ -27,23 +27,26 @@ ul{padding-left:1.3em}</style></head>
 <p class="meta"><code>workflow-error-handler.json</code></p>
 <div class="diagram"><pre class="mermaid">flowchart TD
   n0([&quot;On any workflow error&quot;])
-  n1[&quot;Build signature&quot;]
-  n2[(&quot;Upsert ledger row&quot;)]
-  n3[&quot;Format alert&quot;]
-  n4[&quot;Send Telegram alert&quot;]
-  n0 --&gt; n1
-  n1 --&gt; n2
+  n1([&quot;Report handled failure&quot;])
+  n2[&quot;Build signature&quot;]
+  n3[(&quot;Upsert ledger row&quot;)]
+  n4[&quot;Format alert&quot;]
+  n5[&quot;Send Telegram alert&quot;]
+  n0 --&gt; n2
   n2 --&gt; n3
   n3 --&gt; n4
+  n4 --&gt; n5
+  n1 --&gt; n2
   classDef trig fill:#e8f1ff,stroke:#3b6fd8,color:#0b2a66
-  class n0 trig</pre></div>
+  class n0,n1 trig</pre></div>
 <h3>Steps, in execution order</h3>
 <table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
 <tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>On any workflow error</strong></td><td data-label="Type">Error Trigger: runs when a linked workflow fails</td><td data-label="What it does">Receives the failed workflow, node, error message and execution link from n8n.</td><td data-label="On failure">n/a (entry point)</td></tr>
-<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Build signature</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Masks ids, numbers, URLs, emails and timestamps in the error to build a signature that groups repeats.</td><td data-label="On failure">Stops the run (this is the error handler; n8n does not re-run it on itself)</td></tr>
-<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Upsert ledger row</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Inserts a new failure_ledger row, or bumps recurrence_count and reopens a fixed row for a known signature.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
-<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Format alert</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Writes the alert text: new, repeat or regression, or &quot;ledger write failed&quot; if the database step failed.</td><td data-label="On failure">Stops the run (this is the error handler; n8n does not re-run it on itself)</td></tr>
-<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Send Telegram alert</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the alert to the chat in TELEGRAM_CHAT_ID.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Report handled failure</strong></td><td data-label="Type">Sub-workflow trigger: runs when called</td><td data-label="What it does">Lets another workflow log a failure it recovered from (e.g. LLM down) without crashing; expects the same {execution, workflow} shape as the Error Trigger.</td><td data-label="On failure">Stops the run (this is the error handler; n8n does not re-run it on itself)</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Build signature</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Masks ids, numbers, URLs, emails and timestamps in the error to build a signature that groups repeats.</td><td data-label="On failure">Stops the run (this is the error handler; n8n does not re-run it on itself)</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Upsert ledger row</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Inserts a new failure_ledger row, or bumps recurrence_count and reopens a fixed row for a known signature.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Format alert</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Writes the alert text: new, repeat or regression, or &quot;ledger write failed&quot; if the database step failed.</td><td data-label="On failure">Stops the run (this is the error handler; n8n does not re-run it on itself)</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Send Telegram alert</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the alert to the chat in TELEGRAM_CHAT_ID.</td><td data-label="On failure">Retries up to 3× (2s apart), then continues; the error is passed on as data</td></tr>
 </tbody></table>
 <h3>Where data lives</h3>
 <div class="card"><strong>Writes</strong><ul><li>Postgres table <code>failure_ledger</code></li><li>Telegram chat <code>$env.TELEGRAM_CHAT_ID</code></li></ul><strong>Reads</strong><p class="meta">none</p></div>
@@ -70,12 +73,12 @@ ul{padding-left:1.3em}</style></head>
 <h3>Steps, in execution order</h3>
 <table><thead><tr><th>#</th><th>Node</th><th>Type</th><th>What it does</th><th>On failure</th></tr></thead><tbody>
 <tr><td class="n" data-label="#">1</td><td data-label="Node"><strong>Every Monday 9:00 IST</strong></td><td data-label="Type">Schedule: cron 0 9 * * 1</td><td data-label="What it does">Starts the digest every Monday at 09:00 Asia/Kolkata.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Query ledger</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Counts new and active signatures and open vs fixed, and lists the top recurring and new failures from the last 7 days.</td><td data-label="On failure">Retries up to 3× (5s apart), then stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Format digest</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Builds the Telegram message and the one-row summary for the sheet.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Send digest</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the digest to the chat in TELEGRAM_CHAT_ID.</td><td data-label="On failure">Retries up to 3× (5s apart), then stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Sheets enabled?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Continues to Google Sheets only when DIGEST_SHEETS_ENABLED is &quot;true&quot;.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Append row to Sheet</strong></td><td data-label="Type">Google Sheets: append row</td><td data-label="What it does">Appends one row per week to the Digest tab of the sheet in DIGEST_SHEET_ID.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
-<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Run now (test)</strong></td><td data-label="Type">Manual trigger: runs when you click Execute</td><td data-label="What it does">Starts the same digest on demand, for testing.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Node"><strong>Run now (test)</strong></td><td data-label="Type">Manual trigger: runs when you click Execute</td><td data-label="What it does">Starts the same digest on demand, for testing.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Node"><strong>Query ledger</strong></td><td data-label="Type">Postgres: run query</td><td data-label="What it does">Counts new and active signatures and open vs fixed, and lists the top recurring and new failures from the last 7 days.</td><td data-label="On failure">Retries up to 3× (5s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Node"><strong>Format digest</strong></td><td data-label="Type">Code: JavaScript</td><td data-label="What it does">Builds the Telegram message and the one-row summary for the sheet.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Node"><strong>Send digest</strong></td><td data-label="Type">Telegram: send message</td><td data-label="What it does">Sends the digest to the chat in TELEGRAM_CHAT_ID.</td><td data-label="On failure">Retries up to 3× (5s apart), then stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Node"><strong>Sheets enabled?</strong></td><td data-label="Type">IF: branch on a condition</td><td data-label="What it does">Continues to Google Sheets only when DIGEST_SHEETS_ENABLED is &quot;true&quot;.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
+<tr><td class="n" data-label="#">7</td><td data-label="Node"><strong>Append row to Sheet</strong></td><td data-label="Type">Google Sheets: append row</td><td data-label="What it does">Appends one row per week to the Digest tab of the sheet in DIGEST_SHEET_ID.</td><td data-label="On failure">Stops the run → error workflow runs</td></tr>
 </tbody></table>
 <h3>Where data lives</h3>
 <div class="card"><strong>Writes</strong><ul><li>Telegram chat <code>$env.TELEGRAM_CHAT_ID</code></li><li>Google Sheet (tab <code>Digest</code>, id from <code>$env.DIGEST_SHEET_ID</code>)</li></ul><strong>Reads</strong><ul><li>Postgres table <code>failure_ledger</code></li></ul></div>
