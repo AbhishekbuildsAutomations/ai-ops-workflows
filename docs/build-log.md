@@ -174,3 +174,18 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
 ### 27. flow.html listed steps out of order
 - The depth-first order listed "Save CRM ids" before "Create deal", and pushed short branches to the end.
 - **Fix:** topological order (a node only after everything that feeds it), with a breadth-first tie-break. Chat-model sub-nodes count as feeding their chain.
+
+### 28. Every LLM call returned 404: n8n was calling the Responses API
+- **Symptom:** `Chat model: The resource you are requesting could not be found (404)`, although the same key, base URL and model worked with curl on `/chat/completions`.
+- **Searched first:** the n8n docs say the OpenAI Chat Model "will default to using the Chat Completions API" unless **Use Responses API** is toggled (<!-- doc --> https://docs.n8n.io/integrations/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.lmchatopenai.md). A similar custom-base-URL 404 is open as n8n issue #21651.
+- **Proved it:** pointed the credential at a request-logging container. n8n sent `POST /v1beta/openai/responses`. In 2.40.7 source, node v1.3 has `responsesApiEnabled` with `default: true`, so the docs sentence is misleading for v1.3. Gemini's OpenAI-compatible endpoint has no `/responses`.
+- **Fix:** `"responsesApiEnabled": false` on every OpenAI Chat Model node.
+
+### 29. Gemini's free tier was overloaded: 100–200 s answers and 503 "high demand"
+- **Symptom:** one direct call took 98 s, the next 197 s, for a 21-token answer. Other Gemini models returned `503 This model is currently experiencing high demand`.
+- **Searched:** it's a known, recurring issue, reported even by paid Tier 2 projects on Google's developer forum (<!-- doc --> https://discuss.ai.google.dev/t/503-error-this-model-is-currently-experiencing-high-demand-spikes-in-demand-are-usually-temporary-please-try-again-later/139055).
+- **Fix:**
+  - The primary model (`LLM_MODEL`, Gemini 3.5 Flash-Lite) gets a 20 s timeout.
+  - The chain's **fallback model** (n8n wraps it as LangChain `withFallbacks`) is `LLM_FALLBACK_MODEL` = `gemma-4-26b-a4b-it`: same key, 30 requests/min, 14.4K/day free, about 8 s per call.
+  - Gemma prefixes its JSON with `<thought>…</thought>`, so the validator now strips that and parses the outermost `{…}`.
+- **Trade-off:** when the primary is down, every lead pays the 20 s timeout before the fallback runs. The eval latency shows this honestly.
