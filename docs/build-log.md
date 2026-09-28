@@ -113,3 +113,64 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
 3. **How it never fails itself:** Postgres and Telegram both continue on error with retries, Postgres first. A dead DB still alerts (and says so); a dead bot still logs. The Code nodes never throw. n8n won't recurse an error workflow into itself.
 4. **How it stays runnable and leak-free:** fixed workflow IDs, credentials referenced by name with `id: null`, the chat ID from `$env`, and secrets as Docker `*_FILE` secrets because env access is on. The export script strips metadata and refuses tokens, emails and the chat ID.
 5. **What I'd do next:** suppress repeat alerts within a time window, give the ledger its own DB role, and alert on a spike (N failures in M minutes) rather than on every failure.
+
+---
+
+## Workflow 1: WhatsApp and web-form lead agent (2026-09-28)
+
+### 18. The spec was out of date in four places (researched before building, raised before substituting)
+- **HubSpot private apps:** creation is disabled from 28 Sep 2026 for new accounts, and 26 Oct for existing ones (<!-- doc --> https://developers.hubspot.com/changelog/legacy-private-app-creation-sunset). Service Keys, the replacement, are in public beta with Free-tier support undocumented.
+  **Decision (user):** use a free alternative. Went with **Twenty CRM**, self-hosted in compose. The runner-up was Zoho CRM Free, but it needs a signup and OAuth for every reviewer.
+- **WhatsApp:** Meta charges per service message from 1 Oct 2026, and stops delivering service messages for businesses with no payment method by 30 Sep (<!-- doc --> https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing/non-template-messages/). The docs don't say whether the test number is exempt.
+  **Decision:** build and test with signed, simulated Meta payloads first, and do the phone test separately.
+- **`WEBHOOK_URL`:** deprecated since n8n 2.35; the spec's env var is now `N8N_WEBHOOK_URL`.
+- **LLM free tiers had moved:**
+  - Gemini 2.5 is closed to new projects.
+  - Groq shut down its Llama models on 16 Aug 2026.
+  - Gemini's free-tier limits are only visible inside AI Studio. Read from the account: **gemini-3.5-flash-lite = 15 requests/min, 250K tokens/min, 500 requests/day**.
+
+### 19. Template search first
+- Searched n8n's template library before writing anything.
+- **#18696** (Twenty CRM lead capture) had the right CRM pattern (find → exists? → update/create, filter syntax). But its Twenty node is a **community package** (`@blackswampai/n8n-nodes-twentycrm`), not built in. Kept the pattern, rebuilt it with HTTP Request nodes so a cloner installs nothing.
+- The WhatsApp verification setup (Respond With **Text**, `$json.query['hub.challenge']` in bracket notation) comes from an n8n community thread.
+
+### 20. A missing credential kills the whole run, before the first node
+- **Symptom:** a form lead returned `Error in workflow`. The execution contained a single node: `Chat model: uses invalid credential`.
+- **Cause:** n8n checks the credentials of *every* node when a run starts. A workflow that references a credential that doesn't exist fails immediately, so "continue on error" never gets a chance, even on a branch that would never run.
+- **Fix:** `bootstrap.sh` always creates every credential, using the value `not-configured` when `.env` has none, so a missing key becomes an ordinary API error the flow handles. It never overwrites a credential you've filled in through the UI.
+- **This also fixed a latent Workflow 0 bug:** without a Telegram token, the error handler itself could never start.
+
+### 21. `/healthz` says ready before webhooks are registered
+- **Symptom:** straight after bootstrap, `POST /webhook/lead-form` and `GET /webhook/whatsapp` returned `404 … is not registered`, then worked a few seconds later.
+- **Fix, attempt 1 (rejected):** probing each webhook with its real method would *run* it. `trigger-failure` would log a fake failure, and `whatsapp` a signature mismatch.
+- **Fix:** probe with a CORS preflight, `OPTIONS`. It returns 204 once the webhook is registered and 500 before, and never runs the workflow.
+
+### 22. My own test script hit the wrong n8n
+- **Symptom:** `fake-whatsapp.mjs` kept getting 404, while curl on the same URL worked.
+- **Cause:** its `.env` parser used `^[A-Z_]+=`, which silently skips `N8N_PORT` because of the digit. The script fell back to port 5678, which is a *different* n8n on this Mac (the native RS pipeline). The requests only got 404s there; nothing ran.
+- **Fix:** `^[A-Z0-9_]+=`. **Lesson:** a hard-coded default port can quietly point at another service.
+
+### 23. My own edit corrupted bootstrap.sh
+- A Python `str.replace` used a slice between two `index()` calls. The end marker also appeared earlier in the file, so the slice was empty, and replacing `''` inserts the text between every character: a 3.9 MB file.
+- **Fix:** restored from git and rewrote the file. **Lesson:** anchor replacements on unique text and check the file size after the edit.
+
+### 24. The concurrency test wasn't concurrent
+- The first SQL test ran 5 `docker compose exec` calls in the background, and passed **with the advisory lock removed**. Each `exec` takes long enough to start that the calls ran one after another.
+- **Fix:** start all 5 `psql` sessions inside the container, each running `pg_sleep_until(<same instant>)` before calling `lead_ingest()`.
+- **Result:** without the lock, 4–5 leads per run; with it, exactly 1, every run.
+- **Why the lock works:** PL/pgSQL takes a fresh snapshot per statement, so once the second caller gets the lock, it sees the lead the first caller committed.
+
+### 25. Twenty: the key in the image was a test fixture, and phones are split
+- The only JWT inside the Twenty image was a unit-test fixture with a corrupted payload (`Bad control character in string literal`), not the API key.
+- The real demo key is published in Twenty's SDK (`dev-api-key.ts`, marked "not a secret"). `bootstrap.sh` fetches it only when `CRM_ENABLED=true` and no key is set, so it never sits in this repo, where secret scanners would flag it.
+- Twenty parses a full number such as `+91` + 10 digits into calling code `+91` and the 10-digit national number, so filtering on the full number finds nothing.
+- **Fix:** search every possible national-number suffix in one `in` filter, then keep only the person whose calling code + number equals the full number.
+
+### 26. The Postgres node emits an empty item for zero rows
+- **Symptom:** the second follow-up run, with nothing due, crashed in `Decide channel` (`reading 'replace' of undefined`).
+- **Cause:** a query returning no rows still passes one empty item on. The CRM sync had the same trap for spam leads.
+- **Fix:** drop items without `lead_id`, and add an explicit `Worth syncing?` IF.
+
+### 27. flow.html listed steps out of order
+- The depth-first order listed "Save CRM ids" before "Create deal", and pushed short branches to the end.
+- **Fix:** topological order (a node only after everything that feeds it), with a breadth-first tie-break. Chat-model sub-nodes count as feeding their chain.
