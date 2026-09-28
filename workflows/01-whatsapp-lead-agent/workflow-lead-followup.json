@@ -1,0 +1,371 @@
+{
+  "id": "aiopsLeadFollow1",
+  "name": "01 · Lead follow-up",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "e522b9a7-8885-4543-8b73-8d5b24f54a29",
+      "name": "Every 30 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Looks for leads that went quiet after our reply.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {},
+      "id": "1293f172-f337-4fa1-8898-bab5c530cfbd",
+      "name": "Run now (test)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "notes": "Same run on demand, for testing.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Claim first, send second: followed_up_at is set in this statement, so a lead can never\n-- be picked twice, even if two runs overlap or the send below fails.\nUPDATE leads l SET followed_up_at = now(), followup_status = 'claimed', updated_at = now()\nWHERE l.id IN (\n  SELECT id FROM leads\n  WHERE status = 'replied'\n    AND followed_up_at IS NULL\n    AND last_outbound_at < now() - ($1::numeric * interval '1 hour')\n    AND last_inbound_at < last_outbound_at\n  ORDER BY last_outbound_at\n  LIMIT 20\n  FOR UPDATE SKIP LOCKED)\nRETURNING l.id AS lead_id, l.source, l.contact, l.contact_name,\n  (now() - l.last_inbound_at) < interval '24 hours' AS in_window,\n  (SELECT b.data->>'followup_message' FROM business_facts b WHERE b.id = 1) AS followup_message;",
+        "options": {
+          "queryReplacement": "={{ [ Number($env.FOLLOWUP_HOURS || 4) ] }}",
+          "connectionTimeout": 10
+        }
+      },
+      "id": "92ecd021-215a-4658-8076-e85830e2bb5f",
+      "name": "Claim due follow-ups",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        100
+      ],
+      "notes": "Claims leads we replied to FOLLOWUP_HOURS ago with no answer since; marks them first so none is followed up twice.",
+      "notesInFlow": true,
+      "credentials": {
+        "postgres": {
+          "id": null,
+          "name": "Ops ledger (Postgres)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// WhatsApp only allows free-form messages within 24h of the customer's last message\n// (the customer service window); after that only a pre-approved template may be sent.\nconst l = $json;\nconst action = l.source === 'whatsapp' ? (l.in_window ? 'send' : 'template_needed') : 'manual';\nreturn { json: { ...l, action, wa_to: l.contact.replace(/^\\+/, '') } };"
+      },
+      "id": "a2514cfc-e63e-4606-8295-5b17288b8353",
+      "name": "Decide channel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ],
+      "notes": "WhatsApp inside the 24-hour window: send. Outside: log \"template needed\". Form leads: tell the owner.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ffdcb155-e5e4-4961-80f9-625958fe4b1a",
+              "leftValue": "={{ $json.action === 'send' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "60da9196-ab3e-4db6-8e19-6bc55fabbd2e",
+      "name": "Send now?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        100
+      ],
+      "notes": "Only in-window WhatsApp leads get an automatic follow-up.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v26.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: $json.wa_to, type: 'text', text: { body: $json.followup_message } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a3a6ec9a-e58f-4a7c-8272-f6f25317d6f1",
+      "name": "Send follow-up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "notes": "Sends the one follow-up text from business-facts.json.",
+      "notesInFlow": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "WhatsApp Cloud API token"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH d AS (SELECT $1::bigint AS id, $2::text AS action, $3::boolean AS sent)\n, upd AS (\n  UPDATE leads l SET\n    status = CASE d.action WHEN 'send' THEN CASE WHEN d.sent THEN 'followed_up' ELSE 'needs_human' END\n                           WHEN 'template_needed' THEN 'template_needed' ELSE 'followup_manual' END,\n    followup_status = CASE WHEN d.action = 'send' AND NOT d.sent THEN 'send_failed' ELSE d.action END,\n    last_outbound_at = CASE WHEN d.sent THEN now() ELSE l.last_outbound_at END,\n    updated_at = now()\n  FROM d WHERE l.id = d.id\n  RETURNING l.id, l.status, l.contact, l.contact_name, l.source)\n, msg AS (\n  INSERT INTO lead_messages (lead_id, direction, channel, body, delivered)\n  SELECT d.id, 'out', 'whatsapp', $4, true FROM d WHERE d.sent)\nSELECT * FROM upd;",
+        "options": {
+          "queryReplacement": "={{ [ $('Decide channel').item.json.lead_id, $('Decide channel').item.json.action, $('Decide channel').item.json.action === 'send' && !$json.error, $('Decide channel').item.json.followup_message ] }}",
+          "connectionTimeout": 10
+        }
+      },
+      "id": "33ba6a15-c903-4eaf-875f-f73af56a9b7f",
+      "name": "Record follow-up",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        100
+      ],
+      "notes": "Sets followed_up / template_needed / followup_manual (or needs_human if the send failed).",
+      "notesInFlow": true,
+      "credentials": {
+        "postgres": {
+          "id": null,
+          "name": "Ops ledger (Postgres)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a1c42a01-e1d5-483c-8614-277010d8e18b",
+              "leftValue": "={{ $json.status !== 'followed_up' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a89b01da-bccf-4f3e-8d1a-47f91a5db32c",
+      "name": "Owner action needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        100
+      ],
+      "notes": "Anything that was not sent automatically goes to the owner.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ '⏰ Follow-up needed for lead #' + $json.id + ' (' + $json.source + ', ' + ($json.contact_name || 'no name') + '): ' + ({ template_needed: 'outside WhatsApp 24h window, needs an approved template', followup_manual: 'web-form lead, reply by phone or email', needs_human: 'WhatsApp did not accept the follow-up' }[$json.status] || $json.status) }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "b367fdeb-42b7-4564-8ed0-a81efe58a0bf",
+      "name": "Tell owner",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        0
+      ],
+      "notes": "One Telegram line per lead that needs a manual follow-up.",
+      "notesInFlow": true,
+      "credentials": {
+        "telegramApi": {
+          "id": null,
+          "name": "Ops alerts (Telegram bot)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "content": "## Follow-up\nOne follow-up per lead, ever: rows are claimed (`followed_up_at` set) before anything is sent.\n\nWhatsApp free-form messages are only allowed within 24h of the customer's last message; outside it, status becomes `template_needed` and nothing is sent.",
+        "height": 300,
+        "width": 380,
+        "color": 3
+      },
+      "id": "0da43bb6-b952-4a1a-8f36-82e12886dace",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -120
+      ]
+    }
+  ],
+  "connections": {
+    "Every 30 minutes": {
+      "main": [
+        [
+          {
+            "node": "Claim due follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (test)": {
+      "main": [
+        [
+          {
+            "node": "Claim due follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim due follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Decide channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide channel": {
+      "main": [
+        [
+          {
+            "node": "Send now?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send now?": {
+      "main": [
+        [
+          {
+            "node": "Send follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send follow-up": {
+      "main": [
+        [
+          {
+            "node": "Record follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record follow-up": {
+      "main": [
+        [
+          {
+            "node": "Owner action needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Owner action needed?": {
+      "main": [
+        [
+          {
+            "node": "Tell owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "aiopsErrHandler0",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Asia/Kolkata"
+  }
+}
