@@ -43,6 +43,8 @@ for (const c of cases) {
   console.log(`#${String(c.id).padStart(2)} ${String(ms).padStart(5)}ms ${r.intent_ok ? 'ok ' : 'MISS'} intent=${r.intent} (want ${c.label.intent}) score=${r.fit_score} hot=${r.hot}/${c.label.hot} valid=${r.schema_valid} attempts=${r.attempts} status=${r.status}`);
   await sleep(gapMs);
 }
+// The eval's contacts are fictional: close their leads so the follow-up workflow never nudges the owner about them.
+sql(`UPDATE leads SET followed_up_at = now(), followup_status = 'eval' WHERE contact LIKE '+1000${run}%';`);
 
 const pct = (a, b) => (b ? Math.round((1000 * a) / b) / 10 : null);
 const n = results.length;
