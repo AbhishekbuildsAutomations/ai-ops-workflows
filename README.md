@@ -5,7 +5,7 @@ n8n workflows that solve problems companies list in AI-automation job posts. Eac
 | # | Workflow | Problem it solves | Status | Flow | Demo |
 |---|----------|-------------------|--------|------|------|
 | 0 | [Error handling and failure ledger](workflows/00-error-handling/) | Automations fail silently; nobody knows a run broke until a customer complains. Every failure is logged to Postgres, grouped by a normalised signature, alerted on Telegram, and summarised weekly. | ✅ done | [flow.html](workflows/00-error-handling/flow.html) | [results](workflows/00-error-handling/README.md#results) |
-| 1 | [WhatsApp lead qualification agent](workflows/01-whatsapp-lead-agent/) | Leads on WhatsApp and web forms get late or no replies and never reach a CRM. Every message is qualified by an LLM (validated JSON, retry, guard), answered in seconds, stored in Postgres and Twenty CRM, hot leads alert the owner, and quiet leads get one follow-up. | 🟡 in progress | [flow.html](workflows/01-whatsapp-lead-agent/flow.html) | [results](workflows/01-whatsapp-lead-agent/README.md#results) |
+| 1 | [WhatsApp lead qualification agent](workflows/01-whatsapp-lead-agent/) | Leads on WhatsApp and web forms get late or no replies and never reach a CRM. Every message is qualified by an LLM (validated JSON, retry, guard), answered in seconds, stored in Postgres and Twenty CRM, hot leads alert the owner, and quiet leads get one follow-up. | ✅ done | [flow.html](workflows/01-whatsapp-lead-agent/flow.html) | [results](workflows/01-whatsapp-lead-agent/README.md#results) |
 
 Every workflow in this repo uses Workflow 0 as its error workflow.
 

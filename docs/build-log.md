@@ -230,6 +230,12 @@ Stack: n8n 2.40.7 (Docker image), Postgres 18, Docker Compose 5.5 on Colima, mac
 - **Verified:** fake-WhatsApp run with 4 messages: the mid-qualification message was stored only, then the answer, exactly one acknowledgement, and a Telegram forward for each later message. Then a real follow-up from a phone got the acknowledgement.
 - **Lesson:** a fixed acknowledgement reads as a template, and that's the trade-off. It can't promise a time slot the business doesn't have.
 
+### 35. Screenshots, and the eval was spamming the owner
+- Screenshots from the real run: the WhatsApp chat, the Telegram handoff alerts and the Twenty deal. The phone number isn't visible in any of them.
+- **Found while taking them:** 14 "Follow-up needed" nudges on Telegram at 11:30 PM, all for eval leads. The follow-up workflow was right: those were web-form leads with no answer after `FOLLOWUP_HOURS`. The eval just left its fictional leads open.
+  **Fix:** `run-eval.mjs` now closes its own leads when it finishes (`followed_up_at` set, `followup_status = 'eval'`), so they are never picked up.
+- **Also found:** Docker (Colima) had stopped overnight, so the bot was offline until restarted. That's fine for a laptop demo; a real deployment needs a host that stays up.
+
 ---
 
 ## What I should be able to explain about Workflow 1

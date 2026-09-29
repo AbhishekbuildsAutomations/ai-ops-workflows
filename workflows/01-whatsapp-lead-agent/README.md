@@ -191,7 +191,19 @@ The follow-up workflow can be run on demand: open **01 · Lead follow-up** in n8
 
 ## Screenshots
 
-_Pending: WhatsApp chat on a phone (number blurred), Telegram hot-lead alert, Twenty CRM person + deal._
+A real run on 2026-09-28, from a phone to the Meta test number.
+
+**WhatsApp:** the first message is qualified (buy, 90) and answered with the facts price; the follow-up gets the fixed acknowledgement and goes to a human. (The Jasper's Market message is Meta's sample template, sent when the phone was added as a recipient.)
+
+![WhatsApp conversation with the lead agent](screenshots/whatsapp-chat.png)
+
+**Telegram:** the handoff alerts. The bottom one is the real lead; the two above come from the fake-WhatsApp test and show the other states (a send Meta refused, and an acknowledgement that was already sent).
+
+![Telegram handoff alerts](screenshots/telegram-handoff.png)
+
+**Twenty CRM:** the deal the sync created. It's in *Screening* because the lead was hot, and linked to the person record (which holds the phone number, so it isn't shown).
+
+![Twenty CRM deal](screenshots/twenty-crm-deal.png)
 
 ## Known limits
 
